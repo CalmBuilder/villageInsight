@@ -1,0 +1,113 @@
+include:
+  - ./docker/docker-compose-base.yml
+
+services:
+  api:
+    profiles: ["application"]
+    build:
+      context: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://village_insight:village_insight@postgres:5432/village_insight
+      UPLOAD_ROOT: /data/uploads
+      SECRET_KEY_PATH: /data/uploads/.secrets/settings.key
+      IMPORT_ROOTS: /data/import
+    command: >
+      sh -c "alembic upgrade head &&
+      uvicorn village_insight.api.app:app --host 0.0.0.0 --port 8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - village-insight
+    volumes:
+      - upload_data:/data/uploads
+      - ./data/import:/data/import:ro
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  worker-parse:
+    profiles: ["application"]
+    build:
+      context: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://village_insight:village_insight@postgres:5432/village_insight
+      UPLOAD_ROOT: /data/uploads
+      SECRET_KEY_PATH: /data/uploads/.secrets/settings.key
+      IMPORT_ROOTS: /data/import
+    command: >
+      sh -c 'village-insight-worker --lane parse
+      --concurrency "$${PARSE_WORKERS:-2}"'
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - village-insight
+    volumes:
+      - upload_data:/data/uploads
+      - ./data/import:/data/import:ro
+    restart: unless-stopped
+
+  worker-hermes:
+    profiles: ["application"]
+    build:
+      context: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://village_insight:village_insight@postgres:5432/village_insight
+      UPLOAD_ROOT: /data/uploads
+      SECRET_KEY_PATH: /data/uploads/.secrets/settings.key
+      IMPORT_ROOTS: /data/import
+    command: >
+      sh -c 'village-insight-worker --lane hermes
+      --concurrency "$${HERMES_WORKERS:-1}"'
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - village-insight
+    volumes:
+      - upload_data:/data/uploads
+      - ./data/import:/data/import:ro
+    restart: unless-stopped
+
+  worker-materialize:
+    profiles: ["application"]
+    build:
+      context: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://village_insight:village_insight@postgres:5432/village_insight
+      UPLOAD_ROOT: /data/uploads
+      SECRET_KEY_PATH: /data/uploads/.secrets/settings.key
+      IMPORT_ROOTS: /data/import
+    command: >
+      sh -c 'village-insight-worker --lane materialize
+      --concurrency "$${MATERIALIZE_WORKERS:-1}"'
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - village-insight
+    volumes:
+      - upload_data:/data/uploads
+      - ./data/import:/data/import:ro
+    restart: unless-stopped
+
+  web:
+    profiles: ["application"]
+    build:
+      context: ./frontend
+    depends_on:
+      - api
+    networks:
+      - village-insight
+    ports:
+      - "5173:80"
+    restart: unless-stopped
+
+volumes:
+  upload_data:
+    name: village_insight_upload_data

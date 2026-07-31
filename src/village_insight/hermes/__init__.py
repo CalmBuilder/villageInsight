@@ -1,0 +1,1 @@
+"""Embedded Hermes integration boundary."""

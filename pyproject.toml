@@ -1,0 +1,81 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "village-insight"
+version = "0.1.0"
+description = "Template-driven structured document ingestion and trusted village-data Q&A"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "Proprietary" }
+dependencies = [
+  "alembic>=1.14,<2",
+  "cryptography>=46,<47",
+  "fastapi>=0.115,<1",
+  "hermes-agent==0.19.0",
+  "openpyxl>=3.1,<4",
+  "python-calamine>=0.5,<1",
+  "psycopg[binary]>=3.2,<4",
+  "pydantic>=2.10,<3",
+  "pydantic-settings>=2.7,<3",
+  "python-multipart>=0.0.20,<1",
+  "pwdlib[argon2]>=0.3,<1",
+  "sqlalchemy>=2.0.36,<3",
+  "sqlglot>=26,<29",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28,<1",
+  "mypy>=1.14,<2",
+  "pytest>=8.3,<9",
+  "pytest-cov>=6,<7",
+  "ruff>=0.9,<1",
+  "xlwt==1.3.0",
+]
+
+[project.scripts]
+village-insight-hermes-check = "village_insight.hermes.smoke:main"
+village-insight-hermes-live-check = "village_insight.hermes.live_check:main"
+village-insight-worker = "village_insight.worker:main"
+village-insight-corpus-analyze = "village_insight.corpus:main"
+village-insight-catalog-maintain = "village_insight.templates.maintenance:main"
+village-insight-seed-generate = "village_insight.templates.seeds:main"
+village-insight-four-layer-seed = "village_insight.templates.four_layer_seeds:main"
+village-insight-template-regression = "village_insight.templates.regression:main"
+village-insight-recomposition-regression = "village_insight.templates.recomposition_regression:main"
+village-insight-demo-identities = "village_insight.identity_demo:main"
+village-insight-question-benchmark = "village_insight.question_benchmark:main"
+village-insight-question-classify = "village_insight.question_benchmark_classification:main"
+village-insight-question-tool-map = "village_insight.question_tool_mapping:main"
+village-insight-population-contract = "village_insight.population_contract_bootstrap:main"
+village-insight-population-regression = "village_insight.population_contract_regression:main"
+village-insight-party-contract = "village_insight.party_member_contract_bootstrap:main"
+village-insight-party-regression = "village_insight.party_member_contract_regression:main"
+village-insight-hermes-question-regression = "village_insight.hermes_question_regression:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/village_insight"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = ["other_projects", "frontend", "data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["openpyxl.*", "python_calamine", "run_agent"]
+ignore_missing_imports = true
