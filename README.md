@@ -50,7 +50,7 @@ cp docker/.env.example docker/.env      # PostgreSQL 容器配置；本地体验
 创建以下两个应用账号，默认密码均为 `VillageInsight-ChangeMe-2026`：
 
 - `admin`：平台管理员，登录后进入管理端；
-- `demo`：演示数据操作员，可上传、治理和查询“示例村”的演示数据。
+- `demo`：演示数据操作员，可上传和查询“演示一村”的演示数据。
 
 两份 `.env` 都已被 Git 忽略，职责分别是：
 
@@ -465,24 +465,29 @@ uv run python -m village_insight.synthetic_dataset validate \
 13/13 exact；两者的 Region、Sheet、Workbook Route 都必须命中清单指定的 ID 和版本，
 并且 `requires_hermes` 为 `false`。
 
-### 3. 导入样例数据
+### 3. 启动测试应用（不会导入样例数据）
 
 ```bash
 ./app.sh start
 ./app.sh status
 ```
 
-登录后进入“批次”，创建或选择专用测试租户下的村级单元“演示一村”，点击“新建导入”
-并选择“批量上传”，一次上传：
+这两条命令只启动应用、迁移数据库结构并幂等初始化 `admin` 和 `demo`，不会读取
+`sample-data/`，也不会写入任何样例业务记录。正常重启应用不会重复导入样例数据。
+
+### 4. 手工导入样例数据（仅限测试环境）
+
+使用 `demo` 登录后进入“批次”，其账号已绑定专用演示租户下的“演示一村”。点击
+“新建导入”并选择“批量上传”，一次上传：
 
 - `sample-data/synthetic-village-v1/data/演示一村户籍人口.xlsx`
 - `sample-data/synthetic-village-v1/data/演示一村党员名册.xlsx`
 
 批次名称可填写“演示一村合成数据验收”。等待两个文件状态完成后，文件详情中不应出现
 Hermes 复核；正式记录数应分别为 180 和 120，总计 300。不要把样例上传到真实村的
-业务范围。
+业务范围。生产环境不得执行本节操作；部署或重启生产服务不需要导入这些文件。
 
-### 4. 测试导入和问数
+### 5. 测试导入和问数
 
 进入“问题”，选择刚才的测试租户、演示一村和这两个文件。测试题位于
 `sample-data/synthetic-village-v1/questions.xlsx`；机器可比对值位于
@@ -523,7 +528,7 @@ fi
 from run_agent import AIAgent
 ```
 
-默认关闭 Hermes。`hermes-agent==0.19.0` 已作为固定 Python 依赖安装到
+Hermes 默认启用。`hermes-agent==0.19.0` 已作为固定 Python 依赖安装到
 API/Worker 环境，由程序直接 `from run_agent import AIAgent`，不启动 Gateway。
 可运行 `uv run village-insight-hermes-check` 检查安装。本地模型使用
 SiliconFlow 托管的 DeepSeek V4：普通请求使用
