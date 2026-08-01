@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -81,10 +82,10 @@ export function AccessManagementPage({
   const [suspendTarget, setSuspendTarget] = useState<SuspendTarget>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
 
-  function updateQuery(
+  const updateQuery = useCallback((
     patch: Record<string, string | null>,
     options: { replace?: boolean; resetPage?: boolean } = {},
-  ) {
+  ) => {
     const next = new URLSearchParams(searchParams);
     for (const [key, value] of Object.entries(patch)) {
       if (!value || value === "all") next.delete(key);
@@ -95,9 +96,9 @@ export function AccessManagementPage({
       next.delete("selected");
     }
     setSearchParams(next, { replace: options.replace });
-  }
+  }, [searchParams, setSearchParams]);
 
-  async function refresh(signal?: AbortSignal) {
+  const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
       const offset = (requestedPage - 1) * DIRECTORY_PAGE_SIZE;
       const [nextTenants, nextUsers, nextTenantOptions] = await Promise.all([
@@ -145,13 +146,13 @@ export function AccessManagementPage({
       if (cause instanceof DOMException && cause.name === "AbortError") return;
       setError(cause instanceof Error ? cause.message : "用户与租户加载失败");
     }
-  }
+  }, [deferredQuery, directory, requestedPage, roleFilter, statusFilter]);
 
   useEffect(() => {
     const controller = new AbortController();
     void refresh(controller.signal);
     return () => controller.abort();
-  }, [deferredQuery, directory, requestedPage, roleFilter, statusFilter]);
+  }, [refresh]);
 
   useEffect(() => {
     if (!drawer && !suspendTarget) return;

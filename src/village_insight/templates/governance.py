@@ -29,6 +29,10 @@ from village_insight.parsing.contracts import WorkbookProfile
 from village_insight.parsing.profile_storage import load_workbook_profile
 from village_insight.templates.field_variants import build_field_variant
 from village_insight.templates.lifecycle import publish_field, publish_region_template
+from village_insight.templates.sources import (
+    MANUAL_GOVERNANCE_SOURCE,
+    source_metadata,
+)
 
 
 class GovernanceError(ValueError):
@@ -149,6 +153,14 @@ def _publish_field_learning(
         unit_dimension=current.unit_dimension,
         aliases=next_aliases,
         validators=list(current.validators),
+        source=MANUAL_GOVERNANCE_SOURCE,
+        source_metadata=source_metadata(
+            source=MANUAL_GOVERNANCE_SOURCE,
+            metadata={
+                "learned_from_field_version": current.version,
+                "actor": actor,
+            },
+        ),
     )
     copied = [build_field_variant(_variant_values(variant)) for variant in current.variants]
     by_key = {variant.variant_key: variant for variant in [*copied, *new_variants]}
@@ -198,6 +210,14 @@ def _create_and_publish_field(
         data_type=decision.new_field_data_type,
         unit_dimension=decision.unit,
         aliases=[decision.learn_alias] if decision.learn_alias else [],
+        source=MANUAL_GOVERNANCE_SOURCE,
+        source_metadata=source_metadata(
+            source=MANUAL_GOVERNANCE_SOURCE,
+            metadata={
+                "proposal_id": str(proposal_id),
+                "source_item_id": str(item_id),
+            },
+        ),
     )
     variant_inputs = _learning_variants(
         decision=decision,
@@ -246,7 +266,7 @@ def _learning_variants(
         "record_type": record_type,
         "observed_data_type": observed_data_type,
         "unit_dimension": decision.unit,
-        "source": "governance",
+        "source": MANUAL_GOVERNANCE_SOURCE,
         "confidence_basis_points": 10_000,
         "evidence": provenance,
     }
@@ -687,14 +707,17 @@ def publish_governed_regions(
             field_bindings=bindings,
             identity_policy={},
             quality_rules=[],
-            source="governance",
-            source_metadata={
-                "proposal_id": str(proposal.id),
-                "source_item_id": str(proposal.source_item_id),
-                "sheet_id": sheet.id,
-                "sheet_name": sheet.name,
-                "region_id": region_id,
-            },
+            source=MANUAL_GOVERNANCE_SOURCE,
+            source_metadata=source_metadata(
+                source=MANUAL_GOVERNANCE_SOURCE,
+                metadata={
+                    "proposal_id": str(proposal.id),
+                    "source_item_id": str(proposal.source_item_id),
+                    "sheet_id": sheet.id,
+                    "sheet_name": sheet.name,
+                    "region_id": region_id,
+                },
+            ),
         )
         region.versions.append(region_version)
         database.flush()

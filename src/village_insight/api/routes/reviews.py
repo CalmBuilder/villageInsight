@@ -309,7 +309,11 @@ def _review_statement() -> Select[Any]:
             ),
         )
         .outerjoin(field_counts, field_counts.c.item_id == IngestionItem.id)
-        .where(TemplateProposal.status == ProposalStatus.PENDING)
+        .where(
+            TemplateProposal.status == ProposalStatus.PENDING,
+            TemplateProposal.build_result_retired_at.is_(None),
+            IngestionItem.build_result_deletion_status == "active",
+        )
     )
 
 

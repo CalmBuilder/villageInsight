@@ -42,9 +42,6 @@ def source_supersession_map(
             IngestionItemSupersession.superseded_item_id.in_(
                 eligible_source_item_ids
             ),
-            IngestionItemSupersession.replacement_item_id.in_(
-                eligible_source_item_ids
-            ),
         )
     )
     return {superseded: replacement for superseded, replacement in rows}

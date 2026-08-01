@@ -23,7 +23,8 @@ from village_insight.db.models import (
 )
 from village_insight.db.session import get_session_factory
 
-CONTRACT_VERSION = "four-layer-catalog-snapshot/v1"
+CONTRACT_VERSION = "four-layer-catalog-snapshot/v2"
+LEGACY_CONTRACT_VERSION = "four-layer-catalog-snapshot/v1"
 
 
 def _sha256(payload: dict[str, Any]) -> str:
@@ -37,7 +38,7 @@ def _sha256(payload: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _field_payload(version: SemanticFieldVersion) -> dict[str, Any]:
+def _legacy_field_payload(version: SemanticFieldVersion) -> dict[str, Any]:
     return {
         "name": version.name,
         "description": version.description,
@@ -68,6 +69,14 @@ def _field_payload(version: SemanticFieldVersion) -> dict[str, Any]:
             ],
             key=lambda item: item["variant_key"],
         ),
+    }
+
+
+def _field_payload(version: SemanticFieldVersion) -> dict[str, Any]:
+    return {
+        **_legacy_field_payload(version),
+        "source": version.source,
+        "source_metadata": version.source_metadata,
     }
 
 
@@ -293,7 +302,8 @@ def restore_snapshot(
     *,
     snapshot: dict[str, Any],
 ) -> dict[str, dict[str, int]]:
-    if snapshot.get("contract_version") != CONTRACT_VERSION:
+    contract_version = snapshot.get("contract_version")
+    if contract_version not in {CONTRACT_VERSION, LEGACY_CONTRACT_VERSION}:
         raise ValueError("unsupported four-layer catalog snapshot contract")
     expected_hash = snapshot.get("snapshot_sha256")
     payload = {key: value for key, value in snapshot.items() if key != "snapshot_sha256"}
@@ -318,7 +328,11 @@ def restore_snapshot(
                 )
             ),
             rows=snapshot["layers"]["semantic_fields"],
-            payload_builder=_field_payload,
+            payload_builder=(
+                _legacy_field_payload
+                if contract_version == LEGACY_CONTRACT_VERSION
+                else _field_payload
+            ),
         ),
         "region_templates": _restore_layer(
             objects=list(

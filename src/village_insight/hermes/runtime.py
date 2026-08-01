@@ -5,6 +5,8 @@ import importlib
 import json
 import multiprocessing
 import os
+import re
+import tempfile
 import threading
 import time
 import uuid
@@ -12,6 +14,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime
 from multiprocessing.process import BaseProcess
+from pathlib import Path
 from typing import Any, Literal, Protocol, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -92,8 +95,28 @@ class HermesUnavailableError(RuntimeError):
     pass
 
 
+class HermesOperatorActionRequiredError(HermesUnavailableError):
+    """Provider configuration or billing must change before retrying."""
+
+    code = "HERMES_PROVIDER_ACTION_REQUIRED"
+
+
 class HermesInvalidResponseError(RuntimeError):
     pass
+
+
+def _validation_error_summary(error: ValidationError) -> list[dict[str, str]]:
+    """Return schema diagnostics without response values or other source evidence."""
+    summary: list[dict[str, str]] = []
+    for item in error.errors(include_input=False, include_url=False)[:8]:
+        location = ".".join(str(part) for part in item["loc"]) or "$"
+        summary.append(
+            {
+                "path": location,
+                "type": str(item["type"]),
+            }
+        )
+    return summary
 
 
 class HermesRuntime(Protocol):
@@ -312,59 +335,86 @@ class EmbeddedHermesRuntime:
             if effective_max_tokens is not None:
                 agent_options["max_tokens"] = effective_max_tokens
 
-            agent = agent_class(
-                **agent_options,
-            )
-
-            repair_attempted = False
-            message_count = 0
-            raw = ""
-            for attempt in range(call_policy.repair_attempts + 1):
-                prompt = user_prompt
-                if attempt:
-                    repair_attempted = True
-                    prompt = (
-                        "The previous response was not valid JSON for the required schema. "
-                        "Return a corrected JSON object only. Previous response:\n"
-                        f"{raw[:4000]}"
-                    )
-                conversation = agent.run_conversation(
-                    user_message=prompt,
-                    task_id=session_id,
+            # Hermes writes full request debug dumps for terminal provider 4xx
+            # responses even when HERMES_DUMP_REQUESTS is disabled. Keep every
+            # task's SDK artifacts in a private, short-lived directory so raw
+            # prompts and source evidence never persist in the shared Hermes
+            # sessions directory.
+            with tempfile.TemporaryDirectory(prefix="village-insight-hermes-") as temp_dir:
+                agent = agent_class(
+                    **agent_options,
                 )
-                raw = str(conversation.get("final_response") or "")
-                messages = conversation.get("messages")
-                if isinstance(messages, list):
-                    message_count += len(messages)
-                if raw.lstrip().startswith("HTTP "):
-                    raise HermesUnavailableError(
-                        f"Hermes provider request failed: {raw.strip()[:500]}"
+                agent.logs_dir = Path(temp_dir)
+
+                repair_attempted = False
+                message_count = 0
+                raw = ""
+                validation_errors: list[dict[str, str]] = []
+                for attempt in range(call_policy.repair_attempts + 1):
+                    prompt = user_prompt
+                    if attempt:
+                        repair_attempted = True
+                        prompt = (
+                            "The previous response was not valid JSON for the required schema. "
+                            "Repair the listed validation errors and return a corrected JSON "
+                            "object matching the target schema exactly. Preserve already valid "
+                            "content and do not add commentary.\n"
+                            "Validation errors:\n"
+                            f"{json.dumps(validation_errors, ensure_ascii=False)}\n"
+                            "Expected target: one JSON object matching the JSON Schema in the "
+                            "system prompt.\n"
+                            "Previous response:\n"
+                            f"{raw[:4000]}"
+                        )
+                    conversation = agent.run_conversation(
+                        user_message=prompt,
+                        task_id=session_id,
                     )
-                try:
-                    value = output_model.model_validate_json(raw)
-                    return HermesRunResult(
-                        value=value,
-                        trace=HermesRunTrace(
-                            session_id=session_id,
-                            provider=provider,
-                            model=model,
-                            thinking_enabled=call_policy.thinking_enabled,
-                            reasoning_effort=(
-                                call_policy.reasoning_effort
-                                if call_policy.thinking_enabled
-                                else None
+                    raw = str(conversation.get("final_response") or "")
+                    messages = conversation.get("messages")
+                    if isinstance(messages, list):
+                        message_count += len(messages)
+                    if raw.lstrip().startswith("HTTP "):
+                        status_match = re.match(r"HTTP\s+(\d{3})", raw.lstrip())
+                        if status_match and int(status_match.group(1)) in {401, 402, 403}:
+                            raise HermesOperatorActionRequiredError(
+                                "Hermes provider requires operator action; "
+                                f"http_status={status_match.group(1)}"
+                            )
+                        raise HermesUnavailableError(
+                            f"Hermes provider request failed: {raw.strip()[:500]}"
+                        )
+                    try:
+                        value = output_model.model_validate_json(raw)
+                        return HermesRunResult(
+                            value=value,
+                            trace=HermesRunTrace(
+                                session_id=session_id,
+                                provider=provider,
+                                model=model,
+                                thinking_enabled=call_policy.thinking_enabled,
+                                reasoning_effort=(
+                                    call_policy.reasoning_effort
+                                    if call_policy.thinking_enabled
+                                    else None
+                                ),
+                                max_tokens=effective_max_tokens,
+                                enabled_toolsets=call_policy.enabled_toolsets,
+                                repair_attempted=repair_attempted,
+                                message_count=message_count,
                             ),
-                            max_tokens=effective_max_tokens,
-                            enabled_toolsets=call_policy.enabled_toolsets,
-                            repair_attempted=repair_attempted,
-                            message_count=message_count,
-                        ),
-                    )
-                except ValidationError:
-                    if attempt == call_policy.repair_attempts:
-                        break
+                        )
+                    except ValidationError as exc:
+                        validation_errors = _validation_error_summary(exc)
+                        if attempt == call_policy.repair_attempts:
+                            break
+            error_details = ", ".join(
+                f"{item['path']}:{item['type']}" for item in validation_errors
+            )
             raise HermesInvalidResponseError(
                 "Hermes returned a response that does not match the required JSON schema"
+                f"; schema_errors={error_details or 'unknown'}"
+                f"; response_length={len(raw)}"
             )
 
         if "_agent_class" in self.__dict__:
@@ -412,7 +462,14 @@ class EmbeddedHermesRuntime:
                 process.join(timeout=5)
             receiver.close()
             raise HermesUnavailableError("Hermes execution timed out")
-        message = receiver.recv()
+        try:
+            message = receiver.recv()
+        except EOFError:
+            receiver.close()
+            process.join(timeout=5)
+            raise HermesUnavailableError(
+                "Hermes process stopped before returning a result"
+            ) from None
         receiver.close()
         process.join(timeout=5)
         if message[0] == "ok":
@@ -420,6 +477,8 @@ class EmbeddedHermesRuntime:
         error_type, error_message = message[1], message[2]
         if error_type == "HermesInvalidResponseError":
             raise HermesInvalidResponseError(error_message)
+        if error_type == "HermesOperatorActionRequiredError":
+            raise HermesOperatorActionRequiredError(error_message)
         raise HermesUnavailableError(error_message)
 
     async def stream_chat(

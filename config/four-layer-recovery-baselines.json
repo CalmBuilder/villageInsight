@@ -1,0 +1,24 @@
+{
+  "schema_version": 2,
+  "default_baseline": "current-205-expanded",
+  "baselines": {
+    "current-205-expanded": {
+      "label": "205 条目四层闭合后的完整扩充模板基线",
+      "status": "approved",
+      "bundle_path": "recovery/four-layer-baselines/current-205-expanded/catalog-bundle.json.gz",
+      "file_sha256": "b8c7ee1c46d496d7ad17fa4959edb083c3ec13cf2816a84acf87f9b33fa848f7",
+      "bundle_sha256": "f4f6673a49d98eead2dc188de558e66eeac8219de8aa288385fbee7e5f9fd139",
+      "snapshot_sha256": "17f70be7cf6d53a561d7487a2c6009f795dcb7d7456d23d0364e07236fef09db",
+      "counts": {
+        "semantic_fields": 1075,
+        "region_templates": 386,
+        "sheet_compositions": 328,
+        "workbook_routes": 210
+      },
+      "evidence": [
+        "docs/3个村的入库优化和模版扩充/20-run006-v8-known-corpus-report.json",
+        "docs/3个村的入库优化和模版扩充/22-current-final-205-v8-closed-four-layer-report.json"
+      ]
+    }
+  }
+}

@@ -1,6 +1,7 @@
-import { useDeferredValue, useEffect, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
+  deleteBuildResult,
   getFiles,
   getItemFieldMatches,
   getItemMatch,
@@ -24,7 +25,14 @@ import {
 import { IngestionStageRail } from "../components/IngestionStageRail";
 import { StatusBadge } from "../components/StatusBadge";
 
-type Filter = "all" | "imported" | "processing" | "hermes" | "review" | "failed";
+type Filter =
+  | "all"
+  | "imported"
+  | "partial"
+  | "processing"
+  | "hermes"
+  | "review"
+  | "failed";
 type FilterTone = "neutral" | "success" | "progress" | "assist" | "review" | "danger";
 type IntakeMode = "upload" | "folder" | "directory";
 
@@ -33,6 +41,7 @@ const FILE_PAGE_SIZES = [10, 20, 50] as const;
 const fileFilters = new Set<Filter>([
   "all",
   "imported",
+  "partial",
   "processing",
   "hermes",
   "review",
@@ -54,6 +63,7 @@ const filterOptions: Array<{
 }> = [
   { key: "all", label: "全部文件", hint: "已接收", tone: "neutral" },
   { key: "imported", label: "已正式入库", hint: "可用于问数", tone: "success" },
+  { key: "partial", label: "部分语义", hint: "原值已保留", tone: "assist" },
   { key: "processing", label: "自动处理中", hint: "后台执行", tone: "progress" },
   { key: "hermes", label: "AI 辅助", hint: "仅在必要时", tone: "assist" },
   { key: "review", label: "待治理", hint: "不阻断入库", tone: "review" },
@@ -122,6 +132,7 @@ export function BatchPage({ currentUser }: { currentUser: CurrentUser }) {
   const [counts, setCounts] = useState<Record<Filter, number>>({
     all: 0,
     imported: 0,
+    partial: 0,
     processing: 0,
     hermes: 0,
     review: 0,
@@ -142,16 +153,17 @@ export function BatchPage({ currentUser }: { currentUser: CurrentUser }) {
   const [error, setError] = useState("");
   const [detailError, setDetailError] = useState("");
   const [reimporting, setReimporting] = useState(false);
+  const [deletingResult, setDeletingResult] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const tableViewportRef = useRef<HTMLDivElement>(null);
   const directoryRequestId = useRef(0);
   const detailRequestController = useRef<AbortController | null>(null);
   const closedDetailId = useRef<string | null>(null);
 
-  function updateDirectoryQuery(
+  const updateDirectoryQuery = useCallback((
     patch: Record<string, string | null>,
     options: { resetPage?: boolean; replace?: boolean } = {},
-  ) {
+  ) => {
     const next = new URLSearchParams(searchParams);
     for (const [key, value] of Object.entries(patch)) {
       if (!value || value === "all") next.delete(key);
@@ -159,22 +171,22 @@ export function BatchPage({ currentUser }: { currentUser: CurrentUser }) {
     }
     if (options.resetPage) next.delete("page");
     setSearchParams(next, { replace: options.replace });
-  }
+  }, [searchParams, setSearchParams]);
 
-  function goToPage(page: number) {
+  const goToPage = useCallback((page: number) => {
     updateDirectoryQuery({ page: page > 1 ? String(page) : null });
     tableViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-  }
+  }, [updateDirectoryQuery]);
 
-  function closeDetail() {
+  const closeDetail = useCallback(() => {
     detailRequestController.current?.abort();
     detailRequestController.current = null;
     closedDetailId.current = selectedItem?.id ?? selectedFileId ?? null;
     setSelectedItem(null);
     updateDirectoryQuery({ file: null }, { replace: true });
-  }
+  }, [selectedFileId, selectedItem?.id, updateDirectoryQuery]);
 
-  async function refresh(signal?: AbortSignal) {
+  const refresh = useCallback(async (signal?: AbortSignal) => {
     const requestId = ++directoryRequestId.current;
     setLoading(true);
     try {
@@ -201,56 +213,9 @@ export function BatchPage({ currentUser }: { currentUser: CurrentUser }) {
     } finally {
       if (requestId === directoryRequestId.current) setLoading(false);
     }
-  }
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void refresh(controller.signal);
-    return () => controller.abort();
   }, [deferredQuery, filter, offset, pageSize, villageFilter]);
 
-  useEffect(() => {
-    if (counts.processing === 0) return;
-    const timer = window.setInterval(() => void refresh(), 5000);
-    return () => window.clearInterval(timer);
-  }, [counts.processing, deferredQuery, filter, offset, pageSize, villageFilter]);
-
-  useEffect(() => {
-    if (!fileRef.current) return;
-    if (mode === "folder") fileRef.current.setAttribute("webkitdirectory", "");
-    else fileRef.current.removeAttribute("webkitdirectory");
-  }, [mode, intakeOpen]);
-
-  useEffect(() => {
-    if (!total) return;
-    const lastPage = Math.max(1, Math.ceil(total / pageSize));
-    if (requestedPage > lastPage) goToPage(lastPage);
-  }, [pageSize, requestedPage, total]);
-
-  useEffect(() => {
-    if (!selectedFileId) {
-      closedDetailId.current = null;
-      if (selectedItem) setSelectedItem(null);
-      return;
-    }
-    if (closedDetailId.current === selectedFileId) return;
-    if (selectedItem?.id === selectedFileId) return;
-    const item = files.find((file) => file.id === selectedFileId);
-    if (item) void openDetail(item, false);
-  }, [files, selectedFileId, selectedItem]);
-
-  useEffect(() => {
-    if (!intakeOpen && !selectedItem) return;
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      if (selectedItem) closeDetail();
-      else setIntakeOpen(false);
-    }
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [intakeOpen, selectedItem, searchParams]);
-
-  async function openDetail(item: FileLedgerItem, syncUrl = true) {
+  const openDetail = useCallback(async (item: FileLedgerItem, syncUrl = true) => {
     detailRequestController.current?.abort();
     const controller = new AbortController();
     detailRequestController.current = controller;
@@ -283,7 +248,54 @@ export function BatchPage({ currentUser }: { currentUser: CurrentUser }) {
     if (results.every((result) => result.status === "rejected")) {
       setDetailError("处理详情尚未就绪，请稍后刷新。");
     }
-  }
+  }, [updateDirectoryQuery]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void refresh(controller.signal);
+    return () => controller.abort();
+  }, [refresh]);
+
+  useEffect(() => {
+    if (counts.processing === 0) return;
+    const timer = window.setInterval(() => void refresh(), 5000);
+    return () => window.clearInterval(timer);
+  }, [counts.processing, refresh]);
+
+  useEffect(() => {
+    if (!fileRef.current) return;
+    if (mode === "folder") fileRef.current.setAttribute("webkitdirectory", "");
+    else fileRef.current.removeAttribute("webkitdirectory");
+  }, [mode, intakeOpen]);
+
+  useEffect(() => {
+    if (!total) return;
+    const lastPage = Math.max(1, Math.ceil(total / pageSize));
+    if (requestedPage > lastPage) goToPage(lastPage);
+  }, [goToPage, pageSize, requestedPage, total]);
+
+  useEffect(() => {
+    if (!selectedFileId) {
+      closedDetailId.current = null;
+      if (selectedItem) setSelectedItem(null);
+      return;
+    }
+    if (closedDetailId.current === selectedFileId) return;
+    if (selectedItem?.id === selectedFileId) return;
+    const item = files.find((file) => file.id === selectedFileId);
+    if (item) void openDetail(item, false);
+  }, [files, openDetail, selectedFileId, selectedItem]);
+
+  useEffect(() => {
+    if (!intakeOpen && !selectedItem) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (selectedItem) closeDetail();
+      else setIntakeOpen(false);
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [closeDetail, intakeOpen, selectedItem]);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -362,6 +374,40 @@ export function BatchPage({ currentUser }: { currentUser: CurrentUser }) {
       setDetailError(cause instanceof Error ? cause.message : "重新入库失败");
     } finally {
       setReimporting(false);
+    }
+  }
+
+  async function deleteSelectedBuildResult() {
+    if (
+      !selectedItem ||
+      deletingResult ||
+      selectedItem.build_result_deletion_status !== "active"
+    ) {
+      return;
+    }
+    const confirmed = window.confirm(
+      `确认删除“${selectedItem.original_name}”本次构建的全部产物？\n\n` +
+        `将删除 ${selectedItem.record_count} 条正式记录以及匹配、识别、中间目录和质量问题。` +
+        "原始文件、物理证据、共享发布资产和历史审计会保留。删除后请上传新版文件。",
+    );
+    if (!confirmed) return;
+    detailRequestController.current?.abort();
+    detailRequestController.current = null;
+    setDeletingResult(true);
+    setDetailError("");
+    try {
+      await deleteBuildResult(selectedItem.batch_id, selectedItem.id);
+      setProfile(null);
+      setMatch(null);
+      setRegionMatches([]);
+      setFieldMatches([]);
+      setProposals([]);
+      closeDetail();
+      await refresh();
+    } catch (cause) {
+      setDetailError(cause instanceof Error ? cause.message : "删除构建产物失败");
+    } finally {
+      setDeletingResult(false);
     }
   }
 
@@ -801,13 +847,18 @@ export function BatchPage({ currentUser }: { currentUser: CurrentUser }) {
             <section className="detail-section">
               <h3>正式入库</h3>
               <div className="record-result"><strong>{selectedItem.record_count}</strong><span>条 JSONB 正式记录</span></div>
-              {selectedItem.status === "needs_review" ||
-              selectedItem.formal_import_status === "partial" ? (
+              {selectedItem.governance_pending || selectedItem.status === "needs_review" ? (
                 <Link to="/admin/reviews">前往管理端治理数据 →</Link>
+              ) : null}
+              {selectedItem.formal_import_status === "partial" ? (
+                <p>
+                  {selectedItem.partial_record_count} 条记录存在仅保留原值的来源列；
+                  数据已入库，不会自动转成人工治理任务。
+                </p>
               ) : null}
               {selectedItem.error_message ? <p className="alert">{selectedItem.error_message}</p> : null}
             </section>
-            {!isReadOnly ? (
+            {!isReadOnly && selectedItem.build_result_deletion_status === "active" ? (
               <section className="detail-section reimport-action">
                 <div>
                   <h3>重新解析入库</h3>
@@ -820,6 +871,18 @@ export function BatchPage({ currentUser }: { currentUser: CurrentUser }) {
                   type="button"
                 >
                   {reimporting ? "正在重新排队…" : "重新入库"}
+                </button>
+                <button
+                  className="button button--danger"
+                  disabled={
+                    deletingResult ||
+                    reimporting ||
+                    processingStatuses.has(selectedItem.status)
+                  }
+                  onClick={() => void deleteSelectedBuildResult()}
+                  type="button"
+                >
+                  {deletingResult ? "正在提交删除…" : "删除本次构建产物"}
                 </button>
               </section>
             ) : null}

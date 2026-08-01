@@ -5,6 +5,7 @@ from pathlib import Path
 from village_insight.parsing.adapters.base import ParserAdapter
 from village_insight.parsing.adapters.calamine_adapter import CalamineXlsAdapter
 from village_insight.parsing.adapters.csv_adapter import CsvAdapter
+from village_insight.parsing.adapters.html_table_adapter import ExcelHtmlAdapter
 from village_insight.parsing.adapters.openpyxl_adapter import OpenPyxlAdapter
 from village_insight.parsing.contracts import WorkbookProfile
 from village_insight.parsing.detection import detect_document
@@ -21,6 +22,7 @@ class ParserRouter:
         self.adapters = adapters or (
             OpenPyxlAdapter(),
             CalamineXlsAdapter(),
+            ExcelHtmlAdapter(),
             CsvAdapter(),
         )
 

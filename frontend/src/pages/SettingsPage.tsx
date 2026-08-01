@@ -70,6 +70,8 @@ function ProviderCard({
       </small>
       {preset.api_key_configured ? (
         <em>已配置 {preset.api_key_hint}</em>
+      ) : preset.api_key_reentry_required ? (
+        <em>需要重新录入 Key</em>
       ) : null}
       <p>{preset.description}</p>
     </button>
@@ -99,6 +101,12 @@ export function SettingsPage() {
         setConfiguration(nextConfiguration);
         setForm(configurationToForm(nextConfiguration));
         setPresets(nextPresets);
+        if (nextConfiguration.api_key_reentry_required) {
+          setResult({
+            kind: "error",
+            message: "服务器密钥已变化，请重新输入 API Key，测试通过后保存。",
+          });
+        }
       })
       .catch((cause) => {
         if (cause instanceof DOMException && cause.name === "AbortError") return;
@@ -235,7 +243,13 @@ export function SettingsPage() {
           <span className="status-dot" />
           <span>当前活动</span>
           <strong>{configuration.fast_model}</strong>
-          <small>{configuration.api_key_configured ? configuration.api_key_hint : "未配置 Key"}</small>
+          <small>
+            {configuration.api_key_configured
+              ? configuration.api_key_hint
+              : configuration.api_key_reentry_required
+                ? "需要重新录入 Key"
+                : "未配置 Key"}
+          </small>
         </div>
       </header>
 
@@ -310,6 +324,8 @@ export function SettingsPage() {
               <small>
                 {selectedPreset?.api_key_configured
                   ? "留空沿用这个供应商已加密保存的 Key。"
+                  : selectedPreset?.api_key_reentry_required
+                    ? "原 Key 无法用当前服务器密钥解密，请重新输入。"
                   : "只在服务端加密保存，不会返回到浏览器。"}
               </small>
             </label>

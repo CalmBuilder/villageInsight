@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   acceptReviewProposal,
   getFields,
@@ -10,6 +10,7 @@ import {
   type ReviewQueueItem,
   type SemanticField,
 } from "../lib/api";
+import { initialResolution } from "./reviewResolution";
 
 const reasonLabels: Record<string, string> = {
   NO_TEMPLATE: "未命中模板",
@@ -203,44 +204,6 @@ function formatDate(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
-}
-
-export function initialResolution(
-  evidence: ReviewFieldEvidence,
-  fields: SemanticField[],
-): GovernanceFieldResolution {
-  const action = evidence.hermes_suggestion.action;
-  const targetCode = action === "REUSE_FIELD"
-    || action === "ADD_ALIAS"
-    || action === "ROLE_VARIANT"
-    ? evidence.hermes_suggestion.semantic_field_code ?? null
-    : null;
-  const target = fields.find((field) => field.code === targetCode);
-  const createNew = action === "PROPOSE_NEW_FIELD" && !target;
-  return {
-    source_column_id: evidence.source_column_id,
-    mode: createNew ? "create_new" : target ? "reuse_existing" : "ignore",
-    semantic_field_code: target?.code ?? null,
-    expected_field_version: target?.published_version ?? null,
-    learn_alias: action === "ADD_ALIAS" ? evidence.leaf_header : null,
-    learn_path: true,
-    role: evidence.hermes_suggestion.role ?? null,
-    unit: evidence.hermes_suggestion.unit ?? null,
-    new_field_code: createNew
-      ? (evidence.hermes_suggestion.proposed_field_code ?? null)
-      : null,
-    new_field_name: createNew ? evidence.leaf_header : null,
-    new_field_layer: createNew
-      ? (evidence.hermes_suggestion.layer ?? "domain")
-      : null,
-    new_field_data_type: createNew
-      ? (evidence.hermes_suggestion.data_type
-        ?? evidence.observed_data_type
-        ?? "text")
-      : null,
-    ignore_scope: target || createNew ? null : "file",
-    ignore_reason: target || createNew ? null : "",
-  };
 }
 
 function isComplete(resolution: GovernanceFieldResolution | undefined) {
@@ -563,7 +526,7 @@ export function ReviewsPage() {
     Record<string, GovernanceFieldResolution>
   >({});
 
-  async function refresh(signal?: AbortSignal) {
+  const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
       const [nextReviews, nextFields] = await Promise.all([
         getReviewQueue({
@@ -587,13 +550,13 @@ export function ReviewsPage() {
       if (cause instanceof DOMException && cause.name === "AbortError") return;
       setError(cause instanceof Error ? cause.message : "治理队列加载失败");
     }
-  }
+  }, [reviewOffset, tenantFilter, villageFilter]);
 
   useEffect(() => {
     const controller = new AbortController();
     void refresh(controller.signal);
     return () => controller.abort();
-  }, [reviewOffset, tenantFilter, villageFilter]);
+  }, [refresh]);
 
   const sourceOptions = useMemo(() => {
     const tenants = new Map<string, string>();
@@ -614,25 +577,26 @@ export function ReviewsPage() {
   const selectedSummary =
     visibleReviews.find((review) => review.proposal_id === selectedId)
     ?? visibleReviews[0];
+  const selectedProposalId = selectedSummary?.proposal_id;
   const selected = selectedDetail?.proposal_id === selectedSummary?.proposal_id
     ? selectedDetail
     : undefined;
 
   useEffect(() => {
-    if (!selectedSummary) {
+    if (!selectedProposalId) {
       setSelectedDetail(null);
       return;
     }
     const controller = new AbortController();
     setSelectedDetail(null);
-    void getReview(selectedSummary.proposal_id, controller.signal)
+    void getReview(selectedProposalId, controller.signal)
       .then(setSelectedDetail)
       .catch((cause) => {
         if (cause instanceof DOMException && cause.name === "AbortError") return;
         setError(cause instanceof Error ? cause.message : "治理详情加载失败");
       });
     return () => controller.abort();
-  }, [selectedSummary?.proposal_id]);
+  }, [selectedProposalId]);
 
   useEffect(() => {
     if (!selected) return;

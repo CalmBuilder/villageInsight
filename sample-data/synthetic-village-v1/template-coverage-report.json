@@ -1,0 +1,37 @@
+{
+  "contract_version": "synthetic-template-coverage/v1",
+  "dataset_version": "synthetic-village-v1",
+  "accepted": true,
+  "files": [
+    {
+      "path": "data/演示一村户籍人口.xlsx",
+      "requires_hermes": false,
+      "overall_match_type": "exact",
+      "region_exact": 1,
+      "region_total": 1,
+      "region_contract_exact": true,
+      "field_exact": 9,
+      "field_total": 9,
+      "field_contract_exact": true,
+      "sheet_exact": 1,
+      "sheet_total": 1,
+      "sheet_contract_exact": true,
+      "route_exact": true
+    },
+    {
+      "path": "data/演示一村党员名册.xlsx",
+      "requires_hermes": false,
+      "overall_match_type": "exact",
+      "region_exact": 1,
+      "region_total": 1,
+      "region_contract_exact": true,
+      "field_exact": 13,
+      "field_total": 13,
+      "field_contract_exact": true,
+      "sheet_exact": 1,
+      "sheet_total": 1,
+      "sheet_contract_exact": true,
+      "route_exact": true
+    }
+  ]
+}

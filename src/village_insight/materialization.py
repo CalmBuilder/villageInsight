@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -37,6 +37,35 @@ class MaterializationError(ValueError):
     code = "MATERIALIZATION_FAILED"
 
 
+def _include_selected_raw_evidence(
+    raw_columns: dict[str, Any],
+    selected: list[tuple[dict[str, Any], Any]],
+) -> None:
+    """Make every semantic source cell visible in the record's raw projection."""
+    existing_cell_ids = {
+        str(column.get("source_cell", {}).get("id"))
+        for column in raw_columns.values()
+        if isinstance(column, dict) and isinstance(column.get("source_cell"), dict)
+    }
+    for mapping, cell in selected:
+        if cell.id in existing_cell_ids:
+            continue
+        source_column_id = str(mapping["source_column_id"])
+        key = source_column_id
+        if key in raw_columns:
+            key = f"{source_column_id}:selected:{cell.column}"
+        raw_columns[key] = {
+            "header_path": [str(part) for part in mapping.get("header_path", [])],
+            "source_cell": {
+                "id": cell.id,
+                "coordinate": cell.coordinate,
+                "raw_value": _json_value(cell.raw_value),
+                "display_value": _json_value(cell.display_value),
+            },
+        }
+        existing_cell_ids.add(cell.id)
+
+
 class RequiredValueMissingError(MaterializationError):
     code = "REQUIRED_VALUE_MISSING"
 
@@ -54,13 +83,14 @@ _INVISIBLE_NUMERIC_CHARACTERS = str.maketrans(
         "\ufeff": "",
     }
 )
+_DECIMAL_SCALE = 10
+_DECIMAL_MAX_INTEGER_DIGITS = 28
+_DECIMAL_QUANTUM = Decimal("1e-10")
 _SPREADSHEET_ERROR_PATTERN = re.compile(
     r"^#(?:NULL!|DIV/0!|VALUE!|REF!|NAME\?|NUM!|N/A|GETTING_DATA)$",
     re.IGNORECASE,
 )
-_FORM_INSTRUCTION_PATTERN = re.compile(
-    r"^[（(]?(?:[一二三四五六七八九十]+|\d+)[）).、]"
-)
+_FORM_INSTRUCTION_PATTERN = re.compile(r"^[（(]?(?:[一二三四五六七八九十]+|\d+)[）).、]")
 _UNFILLED_FORM_LABELS = {
     "姓名",
     "村",
@@ -74,9 +104,7 @@ _UNFILLED_FORM_MARKERS = (
     "本人承诺",
     "事由填写",
 )
-_UNFILLED_FORM_FIELD_SUFFIXES = (
-    "姓名",
-)
+_UNFILLED_FORM_FIELD_SUFFIXES = ("姓名",)
 
 
 def _numeric_text(value: Any) -> str:
@@ -84,9 +112,7 @@ def _numeric_text(value: Any) -> str:
 
 
 def _is_spreadsheet_error(value: Any) -> bool:
-    return isinstance(value, str) and bool(
-        _SPREADSHEET_ERROR_PATTERN.fullmatch(value.strip())
-    )
+    return isinstance(value, str) and bool(_SPREADSHEET_ERROR_PATTERN.fullmatch(value.strip()))
 
 
 def _region_definition(
@@ -117,7 +143,20 @@ def _normalized_value(data_type: str, value: Any) -> tuple[str, Any]:
                 raise ValueError("not an integer")
             return "integer/v1", int(decimal)
         if data_type == "decimal":
-            return "decimal/v1", Decimal(_numeric_text(value))
+            decimal = Decimal(_numeric_text(value))
+            if not decimal.is_finite():
+                raise ValueError("decimal must be finite")
+            # RecordIndexValue.decimal_value is NUMERIC(38, 10). Canonicalize
+            # before writing both semantic_data and the typed index so the two
+            # authoritative projections cannot diverge through database-side
+            # rounding. PostgreSQL NUMERIC rounds half away from zero.
+            with localcontext() as context:
+                context.prec = max(64, len(decimal.as_tuple().digits) + _DECIMAL_SCALE + 2)
+                decimal = decimal.quantize(_DECIMAL_QUANTUM, rounding=ROUND_HALF_UP)
+            integer_digits = max(decimal.adjusted() + 1, 0) if decimal else 0
+            if integer_digits > _DECIMAL_MAX_INTEGER_DIGITS:
+                raise ValueError("decimal exceeds NUMERIC(38, 10)")
+            return "decimal/v1", decimal
         if data_type == "boolean":
             normalized = str(value).strip().lower()
             if normalized in {"true", "1", "是", "有", "yes"}:
@@ -140,7 +179,7 @@ def _normalized_value(data_type: str, value: Any) -> tuple[str, Any]:
             )
             return "datetime-iso/v1", parsed_datetime
     except (InvalidOperation, ValueError) as exc:
-        raise MaterializationError(f"cannot normalize {value!r} as {data_type}") from exc
+        raise MaterializationError(f"cannot normalize source value as {data_type}") from exc
     raise MaterializationError(f"unsupported semantic data type: {data_type}")
 
 
@@ -196,10 +235,7 @@ def _is_unfilled_form_value(value: Any) -> bool:
 
 
 def _is_unfilled_form_row(raw_columns: dict[str, dict[str, Any]]) -> bool:
-    values = [
-        column.get("source_cell", {}).get("display_value")
-        for column in raw_columns.values()
-    ]
+    values = [column.get("source_cell", {}).get("display_value") for column in raw_columns.values()]
     return bool(values) and all(_is_unfilled_form_value(value) for value in values)
 
 
@@ -243,14 +279,19 @@ def materialize_plan(
     database: Session,
     plan_id: uuid.UUID,
 ) -> ImportExecution:
+    plan = database.get(ApprovedImportPlan, plan_id)
+    if plan is None:
+        raise MaterializationError("approved import plan not found")
+    if (
+        plan.build_result_retired_at is not None
+        or plan.item.build_result_deletion_status != "active"
+    ):
+        raise MaterializationError("该文件的构建产物已删除，不能再次物化")
     existing = database.scalar(
         select(ImportExecution).where(ImportExecution.approved_plan_id == plan_id)
     )
     if existing is not None:
         return existing
-    plan = database.get(ApprovedImportPlan, plan_id)
-    if plan is None:
-        raise MaterializationError("approved import plan not found")
     batch = plan.item.batch
     if (
         plan.item.tenant_id,
@@ -305,14 +346,10 @@ def materialize_plan(
             )
         )
         database.execute(
-            delete(RecordIndexValue).where(
-                RecordIndexValue.record_id.in_(superseded_record_ids)
-            )
+            delete(RecordIndexValue).where(RecordIndexValue.record_id.in_(superseded_record_ids))
         )
         database.execute(
-            delete(DatasetRecord).where(
-                DatasetRecord.approved_plan_id == plan.supersedes_plan_id
-            )
+            delete(DatasetRecord).where(DatasetRecord.approved_plan_id == plan.supersedes_plan_id)
         )
     profile = load_workbook_profile(profile_record)
     primary_definition = (
@@ -828,6 +865,7 @@ def materialize_plan(
         else:
             raise MaterializationError(f"unsupported approved layout mode: {layout_mode}")
         for row, raw_columns, selected, required_missing, mapping_status in record_inputs:
+            _include_selected_raw_evidence(raw_columns, selected)
             values_by_field: dict[str, Any] = {}
             for mapping, cell in selected:
                 if not mapping.get("role"):
@@ -1068,9 +1106,7 @@ def materialize_plan(
                 ),
             )
         )
-    execution.status = (
-        "partial" if issue_count or incomplete_mapping_count else "completed"
-    )
+    execution.status = "partial" if issue_count or incomplete_mapping_count else "completed"
     execution.record_count = record_count
     execution.value_count = value_count
     execution.completed_at = utcnow()

@@ -31,7 +31,11 @@ class CalamineXlsAdapter:
     def profile(self, path: Path, detection: DetectionResult) -> WorkbookProfile:
         source_sha256 = file_sha256(path)
         parent_workbook_id = workbook_id(source_sha256)
-        workbook = CalamineWorkbook.from_path(path)
+        # Calamine chooses a reader from the path suffix in ``from_path``.
+        # Detection has already verified the OLE signature, so use the content
+        # stream to support safely renamed legacy workbooks.
+        with path.open("rb") as source:
+            workbook = CalamineWorkbook.from_filelike(source)
         sheets: list[SheetProfile] = []
         for index, name in enumerate(workbook.sheet_names):
             parent_sheet_id = sheet_id(parent_workbook_id, index)

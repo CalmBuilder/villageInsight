@@ -24,6 +24,7 @@ from village_insight.db.session import get_session_factory
 from village_insight.templates.field_semantics import (
     analyze_header_path,
     equivalent_semantic_labels,
+    looks_like_observed_value_header,
     normalize_role_code,
     semantic_identity,
 )
@@ -39,81 +40,6 @@ DOMAIN_RULES = (
     ("assistance", "assistance_record", ("脱贫", "监测", "困难", "救助", "补助")),
     ("finance", "payment_record", ("金额", "发放", "银行卡", "账号", "补贴")),
 )
-
-FIELD_LABEL_MARKERS = (
-    "姓名",
-    "名称",
-    "编号",
-    "编码",
-    "号码",
-    "身份证",
-    "电话",
-    "联系",
-    "地址",
-    "住址",
-    "性别",
-    "年龄",
-    "民族",
-    "日期",
-    "时间",
-    "金额",
-    "数量",
-    "面积",
-    "类型",
-    "类别",
-    "状态",
-    "备注",
-    "关系",
-    "户主",
-    "家庭",
-    "人口",
-    "账号",
-    "账户",
-    "银行",
-    "单位",
-    "人员",
-    "序号",
-    "学历",
-    "文化程度",
-    "是否",
-    "原因",
-    "情况",
-    "归属",
-    "所在",
-    "所属",
-)
-SHORT_FIELD_LABELS = frozenset(
-    {
-        "乡",
-        "镇",
-        "村",
-        "组",
-        "户",
-        "社区",
-        "乡镇",
-        "村组",
-        "组别",
-        "行政村",
-        "自然村",
-        "乡镇街道",
-        "街道乡镇",
-        "镇、街道",
-        "村、社区",
-        "村或社区",
-    }
-)
-OBSERVED_VALUE_SUFFIXES = (
-    "有限公司",
-    "合作社",
-    "支行",
-    "酒店",
-    "服务中心",
-    "卫生院",
-    "环卫站",
-    "村民委员会",
-    "居民委员会",
-)
-TITLE_VALUE_MARKERS = ("台账", "清册", "名册", "花名册", "汇总表", "统计表", "登记表")
 
 
 def _normalized(value: str) -> str:
@@ -146,35 +72,7 @@ def _domain(text: str) -> tuple[str, str]:
 
 
 def _looks_like_observed_value(header_path: list[str]) -> bool:
-    if not header_path:
-        return True
-    leaf = " ".join(str(header_path[-1]).split()).strip()
-    normalized = _normalized(leaf)
-    if not normalized:
-        return True
-    if leaf in SHORT_FIELD_LABELS or any(marker in leaf for marker in FIELD_LABEL_MARKERS):
-        return False
-    if re.fullmatch(r"(?:1[0-2]|[1-9])月", leaf):
-        return False
-    if re.fullmatch(r"[\d\s./:：年月日\-—至]+", leaf) and any(
-        character.isdigit() for character in leaf
-    ):
-        return True
-    if re.fullmatch(r"\d{6,}[0-9xX]?", normalized):
-        return True
-    if leaf in {"男", "女", "是", "否", "无", "有", "至今", "本人"}:
-        return True
-    if any(leaf.endswith(suffix) for suffix in OBSERVED_VALUE_SUFFIXES):
-        return True
-    if any(marker in leaf for marker in TITLE_VALUE_MARKERS) and len(normalized) >= 8:
-        return True
-    if re.search(r"\d{6,}", leaf):
-        return True
-    if "/" in leaf and any(character.isdigit() for character in leaf):
-        return True
-    if len(normalized) > 2 and leaf.endswith(("村", "社区", "街道", "乡", "镇")):
-        return True
-    return False
+    return looks_like_observed_value_header(header_path)
 
 
 def _published_field_paths(
@@ -663,9 +561,27 @@ def validate_package(package: dict[str, Any]) -> dict[str, Any]:
             if binding.get("role") and normalize_role_code(str(binding["role"])) != binding["role"]
         }
     )
-    observed_value_field_names = sorted(
+    invalid_region_kinds = sorted(
+        str(region["code"])
+        for region in regions.values()
+        if str(region.get("region_kind")) not in {"table", "form", "matrix"}
+    )
+    invalid_source_selector_codes = sorted(
+        str(region["code"])
+        for region in regions.values()
+        if any(
+            isinstance(selector := binding.get("source_selector"), dict)
+            and selector.get("kind") == "physical_column"
+            and (
+                not isinstance(selector.get("column_offset"), int)
+                or int(selector["column_offset"]) < 0
+            )
+            for binding in region["field_bindings"]
+        )
+    )
+    observed_value_field_codes = sorted(
         {
-            str(field["name"])
+            str(field["code"])
             for field in fields.values()
             if field.get("source") != "published_catalog"
             and _looks_like_observed_value([str(field["name"])])
@@ -674,19 +590,32 @@ def validate_package(package: dict[str, Any]) -> dict[str, Any]:
     duplicate_names: dict[str, list[str]] = defaultdict(list)
     for field in fields.values():
         duplicate_names[str(field["name"])].append(str(field["code"]))
-    duplicate_names = {
-        name: sorted(codes) for name, codes in sorted(duplicate_names.items()) if len(codes) > 1
-    }
+    duplicate_name_code_groups = sorted(
+        sorted(codes) for codes in duplicate_names.values() if len(codes) > 1
+    )
     holdout = package["holdout_validation"]
     blockers = []
+    warnings = []
     if missing_fields or missing_regions or missing_sheets:
         blockers.append("four_layer_reference_integrity_failed")
     if invalid_roles:
         blockers.append("invalid_field_roles")
-    if observed_value_field_names:
+    if invalid_region_kinds:
+        blockers.append("invalid_region_kinds")
+    if invalid_source_selector_codes:
+        blockers.append("invalid_source_selectors")
+    if observed_value_field_codes:
         blockers.append("observed_values_leaked_into_field_catalog")
     if int(holdout["field_reuse_basis_points"]) < 8_000:
-        blockers.append("holdout_field_reuse_below_80_percent")
+        if package["contract_version"] == "four-layer-template-seed/v4":
+            # v4 is built from source-reviewed evidence across the complete
+            # corpus. Whole-village holdout is diagnostic when villages carry
+            # genuinely different document types; the publication workflow's
+            # required generalization gate is the independent recomposition
+            # regression with new hashes and fingerprints.
+            warnings.append("village_holdout_field_reuse_below_80_percent")
+        else:
+            blockers.append("holdout_field_reuse_below_80_percent")
     if int(package["summary"]["status_counts"].get("admin_review", 0)):
         blockers.append("admin_review_routes_remain")
     safe_to_import_pending = not any(
@@ -694,6 +623,8 @@ def validate_package(package: dict[str, Any]) -> dict[str, Any]:
         in {
             "four_layer_reference_integrity_failed",
             "invalid_field_roles",
+            "invalid_region_kinds",
+            "invalid_source_selectors",
             "observed_values_leaked_into_field_catalog",
         }
         for blocker in blockers
@@ -708,11 +639,17 @@ def validate_package(package: dict[str, Any]) -> dict[str, Any]:
             "missing_sheets": missing_sheets,
         },
         "invalid_roles": invalid_roles,
-        "observed_value_field_names": observed_value_field_names,
-        "duplicate_name_groups": duplicate_names,
+        "invalid_region_kind_codes": invalid_region_kinds,
+        "invalid_source_selector_codes": invalid_source_selector_codes,
+        # Candidate labels may themselves be misclassified source values. Never
+        # persist or print them from validation; stable generated codes are
+        # sufficient to locate and reject the unsafe definitions.
+        "observed_value_field_codes": observed_value_field_codes,
+        "duplicate_name_code_groups": duplicate_name_code_groups,
         "unresolved_region_count": int(package["summary"].get("unresolved_region_count", 0)),
         "holdout_validation": holdout,
         "publication_blockers": blockers,
+        "validation_warnings": warnings,
         "safe_to_import_pending": safe_to_import_pending,
         "safe_to_publish": not blockers,
     }

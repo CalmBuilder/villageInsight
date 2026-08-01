@@ -10,6 +10,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from village_insight.api.dependencies import CurrentPrincipal, Database
+from village_insight.build_result_deletion import (
+    BuildResultDeletionError,
+    request_build_result_deletion,
+)
 from village_insight.config import get_settings
 from village_insight.db.models import (
     AdministrativeUnit,
@@ -34,6 +38,7 @@ from village_insight.db.schema import (
     ApprovedImportPlanRead,
     BatchCreate,
     BatchRead,
+    BuildResultDeletionRead,
     DirectoryBatchCreate,
     FieldMatchRead,
     ImportPlanApprove,
@@ -49,7 +54,10 @@ from village_insight.hermes.recognition import (
     ProposalResolutionError,
     accept_recognition_proposal,
 )
-from village_insight.jobs.queue import enqueue_for_item
+from village_insight.jobs.queue import (
+    MATERIALIZATION_JOB_MAX_ATTEMPTS,
+    enqueue_for_item,
+)
 from village_insight.parsing.contracts import WorkbookProfile
 from village_insight.reimport import ReimportError, reset_item_for_reimport
 from village_insight.storage import (
@@ -68,6 +76,14 @@ from village_insight.templates.governance import (
 from village_insight.templates.import_plans import ImportPlanError, approve_plan
 
 router = APIRouter(prefix="/batches", tags=["batches"])
+
+
+def require_active_build_result(item: IngestionItem) -> None:
+    if item.build_result_deletion_status != "active":
+        raise HTTPException(
+            status_code=409,
+            detail="该文件的构建产物已删除或正在删除，请上传新版文件",
+        )
 
 
 def resolve_import_unit(
@@ -270,7 +286,15 @@ def list_items(
     )
     if batch is None:
         raise HTTPException(status_code=404, detail="batch not found")
-    return sorted(batch.items, key=lambda item: item.created_at, reverse=True)
+    return sorted(
+        (
+            item
+            for item in batch.items
+            if item.build_result_deletion_status != "deleted"
+        ),
+        key=lambda item: item.created_at,
+        reverse=True,
+    )
 
 
 @router.get("/{batch_id}/items/{item_id}/profile", response_model=WorkbookProfile)
@@ -284,6 +308,7 @@ def get_item_profile(
     item = database.get(IngestionItem, item_id)
     if item is None or item.batch_id != batch_id:
         raise HTTPException(status_code=404, detail="batch item not found")
+    require_active_build_result(item)
     profile = database.get(DocumentProfile, item_id)
     if profile is None:
         raise HTTPException(status_code=409, detail="document profile is not ready")
@@ -304,6 +329,7 @@ def get_item_match(
     item = database.get(IngestionItem, item_id)
     if item is None or item.batch_id != batch_id:
         raise HTTPException(status_code=404, detail="batch item not found")
+    require_active_build_result(item)
     match = database.get(TemplateMatch, item_id)
     if match is None:
         raise HTTPException(status_code=409, detail="template match is not ready")
@@ -324,6 +350,7 @@ def list_item_region_matches(
     item = database.get(IngestionItem, item_id)
     if item is None or item.batch_id != batch_id:
         raise HTTPException(status_code=404, detail="batch item not found")
+    require_active_build_result(item)
     return list(
         database.scalars(
             select(RegionTemplateMatch)
@@ -351,6 +378,7 @@ def list_item_field_matches(
     item = database.get(IngestionItem, item_id)
     if item is None or item.batch_id != batch_id:
         raise HTTPException(status_code=404, detail="batch item not found")
+    require_active_build_result(item)
     return list(
         database.scalars(
             select(FieldMatch)
@@ -379,6 +407,7 @@ def list_item_proposals(
     item = database.get(IngestionItem, item_id)
     if item is None or item.batch_id != batch_id:
         raise HTTPException(status_code=404, detail="batch item not found")
+    require_active_build_result(item)
     return list(
         database.scalars(
             select(TemplateProposal)
@@ -402,6 +431,7 @@ def list_item_quality_issues(
     item = database.get(IngestionItem, item_id)
     if item is None or item.batch_id != batch_id:
         raise HTTPException(status_code=404, detail="batch item not found")
+    require_active_build_result(item)
     return list(
         database.scalars(
             select(QualityIssue)
@@ -435,6 +465,7 @@ def accept_item_proposal(
         or proposal.source_item_id != item_id
     ):
         raise HTTPException(status_code=404, detail="proposal not found")
+    require_active_build_result(item)
     try:
         suggested_grain = proposal.proposal.get("record_grain")
         record_grain = (
@@ -516,7 +547,7 @@ def accept_item_proposal(
             kind="MATERIALIZE_FILE",
             payload={"plan_id": str(plan.id)},
             idempotency_key=f"materialize:{plan.id}",
-            max_attempts=1,
+            max_attempts=MATERIALIZATION_JOB_MAX_ATTEMPTS,
         )
     except (GovernanceError, ProposalResolutionError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -551,6 +582,7 @@ def reject_item_proposal(
         or proposal.source_item_id != item_id
     ):
         raise HTTPException(status_code=404, detail="proposal not found")
+    require_active_build_result(item)
     if proposal.status != ProposalStatus.PENDING:
         raise HTTPException(status_code=409, detail="proposal has already been resolved")
     if not command.comment.strip():
@@ -579,6 +611,7 @@ def reimport_item(
     item = database.get(IngestionItem, item_id)
     if item is None or item.batch_id != batch.id:
         raise HTTPException(status_code=404, detail="文件不存在")
+    require_active_build_result(item)
     try:
         reset_item_for_reimport(database, item.id)
         database.commit()
@@ -587,6 +620,37 @@ def reimport_item(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     database.refresh(item)
     return item
+
+
+@router.delete(
+    "/{batch_id}/items/{item_id}/build-result",
+    response_model=BuildResultDeletionRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def delete_item_build_result(
+    batch_id: uuid.UUID,
+    item_id: uuid.UUID,
+    database: Database,
+    principal: CurrentPrincipal,
+) -> object:
+    batch = require_batch_access(database, batch_id, principal)
+    require_batch_import_access(principal, batch)
+    item = database.get(IngestionItem, item_id)
+    if item is None or item.batch_id != batch.id:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    try:
+        deletion = request_build_result_deletion(
+            database,
+            item_id=item.id,
+            requested_by_user_id=principal.user.id,
+        )
+        database.commit()
+        database.refresh(deletion)
+        return deletion
+    except BuildResultDeletionError as exc:
+        database.rollback()
+        status_code = 404 if exc.code == "ITEM_NOT_FOUND" else 409
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.post(
@@ -609,6 +673,7 @@ def approve_import_plan(
     item = database.get(IngestionItem, item_id)
     if item is None or item.batch_id != batch_id:
         raise HTTPException(status_code=404, detail="batch item not found")
+    require_active_build_result(item)
     try:
         plan = approve_plan(
             database,
@@ -630,7 +695,7 @@ def approve_import_plan(
         kind="MATERIALIZE_FILE",
         payload={"plan_id": str(plan.id)},
         idempotency_key=f"materialize:{plan.id}",
-        max_attempts=1,
+        max_attempts=MATERIALIZATION_JOB_MAX_ATTEMPTS,
     )
     database.commit()
     database.refresh(plan)

@@ -4,6 +4,7 @@ import hashlib
 import json
 import unicodedata
 import uuid
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
@@ -43,11 +44,13 @@ from village_insight.templates.field_semantics import (
     analyze_header_path,
     equivalent_semantic_labels,
     header_paths_equivalent,
+    looks_like_observed_value_header,
     normalize_role_code,
+    semantic_header_path,
 )
 
-MATCHER_VERSION = "four-layer-matcher/v4"
-FIELD_MATCHER_VERSION = "contextual-field-matcher/v4"
+MATCHER_VERSION = "four-layer-matcher/v5"
+FIELD_MATCHER_VERSION = "contextual-field-matcher/v5"
 FIELD_DIRECT_REUSE_THRESHOLD = 8_500
 FIELD_DIRECT_REUSE_MARGIN = 1_500
 SHEET_MATCHER_VERSION = "sheet-composition-matcher/v1"
@@ -103,7 +106,7 @@ def layout_signature(profile: WorkbookProfile) -> dict[str, Any]:
     }
 
 
-def _fingerprint(signature: dict[str, Any]) -> str:
+def _fingerprint(signature: Any) -> str:
     canonical = json.dumps(
         signature,
         ensure_ascii=False,
@@ -118,7 +121,7 @@ def layout_fingerprint(profile: WorkbookProfile) -> str:
 
 
 def _header_signature(header: HeaderCandidate) -> list[list[str]]:
-    return [_normalized_path(column.header_path) for column in header.columns]
+    return [path for column in header.columns if (path := semantic_header_path(column.header_path))]
 
 
 def region_signature(
@@ -128,7 +131,7 @@ def region_signature(
     paths = _header_signature(header)
     return {
         "kind": region.kind,
-        "columns": len(header.columns),
+        "columns": len(paths),
         "header_depth": max((len(path) for path in paths), default=0),
         "headers": paths,
     }
@@ -190,9 +193,7 @@ def _published_ignore_catalog(database: Session) -> list[IgnoreCatalogEntry]:
             observed_data_type=rule.observed_data_type,
         )
         for rule in database.scalars(
-            select(SemanticIgnoreRule).where(
-                SemanticIgnoreRule.status == TemplateStatus.PUBLISHED
-            )
+            select(SemanticIgnoreRule).where(SemanticIgnoreRule.status == TemplateStatus.PUBLISHED)
         )
     ]
 
@@ -200,6 +201,7 @@ def _published_ignore_catalog(database: Session) -> list[IgnoreCatalogEntry]:
 def _published_field_catalog(
     database: Session,
     versions: list[TemplateVersion],
+    region_versions: list[RegionTemplateVersion] | None = None,
 ) -> dict[str, FieldCatalogEntry]:
     entries: dict[str, FieldCatalogEntry] = {}
     rows = database.execute(
@@ -230,9 +232,7 @@ def _published_field_catalog(
                 entry.aliases.update(equivalent_semantic_labels(variant.alias))
             if variant.header_path:
                 entry.full_paths.add(_normalized_label(" / ".join(variant.header_path)))
-                entry.aliases.update(
-                    equivalent_semantic_labels(variant.header_path[-1])
-                )
+                entry.aliases.update(equivalent_semantic_labels(variant.header_path[-1]))
             if variant.domain and variant.record_type:
                 entry.contexts.add((variant.domain, variant.record_type))
             if variant.role:
@@ -262,6 +262,22 @@ def _published_field_catalog(
                 normalized_role = normalize_role_code(role)
                 if normalized_role:
                     bound_entry.roles.add(normalized_role)
+    for version in region_versions or []:
+        context = (version.domain, version.record_type)
+        for binding in version.field_bindings:
+            code = str(binding.get("semantic_field_code") or "")
+            bound_entry = entries.get(code)
+            if bound_entry is None:
+                continue
+            path = semantic_header_path([str(part) for part in binding.get("header_path", [])])
+            if path:
+                bound_entry.full_paths.add(_normalized_label(" / ".join(path)))
+                bound_entry.aliases.update(equivalent_semantic_labels(path[-1]))
+            if all(context):
+                bound_entry.contexts.add(context)
+            normalized_region_role = normalize_role_code(str(binding.get("role") or ""))
+            if normalized_region_role:
+                bound_entry.roles.add(normalized_region_role)
     return entries
 
 
@@ -319,9 +335,7 @@ def _legacy_component_binding(
         for index in component.field_binding_indexes
         if 0 <= index < len(bindings)
         and header_paths_equivalent(
-            _normalized_path(
-                [str(part) for part in bindings[index].get("header_path", [])]
-            ),
+            _normalized_path([str(part) for part in bindings[index].get("header_path", [])]),
             normalized,
         )
     ]
@@ -350,16 +364,12 @@ def _exact_workbook_template_binding(
     ]
     if len(source_id_candidates) == 1:
         return source_id_candidates[0]
-    normalized = _normalized_path(
-        [str(part) for part in column.header_path]
-    )
+    normalized = _normalized_path([str(part) for part in column.header_path])
     header_candidates = [
         binding
         for binding in bindings
         if header_paths_equivalent(
-            _normalized_path(
-                [str(part) for part in binding.get("header_path", [])]
-            ),
+            _normalized_path([str(part) for part in binding.get("header_path", [])]),
             normalized,
         )
     ]
@@ -386,6 +396,7 @@ def _region_template_binding(
     source_region: ProfileRegion,
     column: Any,
     allow_ordinal: bool,
+    verified_source_region: bool = False,
 ) -> dict[str, Any] | None:
     if version is None:
         return None
@@ -413,6 +424,11 @@ def _region_template_binding(
         for binding in version.field_bindings
         if (binding.get("source_selector") or {}).get("kind") == "physical_column"
         and binding["source_selector"].get("column_offset") == column_offset
+        and (
+            verified_source_region
+            or binding["source_selector"].get("header_path_sha256") is None
+            or binding["source_selector"].get("header_path_sha256") == _fingerprint(normalized)
+        )
     ]
     if len(selector_candidates) == 1:
         return selector_candidates[0]
@@ -472,9 +488,7 @@ def _form_field_match_values(
             or f"form:r{selector['row_offset']}:c{selector['column_offset']}"
         ),
         "header_path": header_path,
-        "observed_data_type": _value_data_type(
-            cell.display_value if cell is not None else None
-        ),
+        "observed_data_type": _value_data_type(cell.display_value if cell is not None else None),
         "semantic_field_code": str(binding["semantic_field_code"]),
         "semantic_field_version": int(binding["semantic_field_version"]),
         "match_type": MatchType.EXACT,
@@ -509,21 +523,29 @@ def _field_match_values(
     allow_ordinal_binding: bool = False,
 ) -> dict[str, Any]:
     observed_type = _observed_data_type(source_region, column=column.column)
-    header_semantics = analyze_header_path(
-        [str(part) for part in column.header_path]
+    raw_header_path = [str(part) for part in column.header_path]
+    semantic_path = semantic_header_path(raw_header_path)
+    header_semantics = analyze_header_path(semantic_path or raw_header_path)
+    verified_source_region = bool(
+        best_region_version is not None
+        and any(
+            isinstance(evidence, dict) and evidence.get("region_id") == source_region.region.id
+            for evidence in (best_region_version.source_metadata or {}).get("evidence", [])
+        )
     )
     direct = _region_template_binding(
         best_region_version,
-        column.header_path,
+        semantic_path,
         source_region=source_region,
         column=column,
         allow_ordinal=allow_ordinal_binding,
+        verified_source_region=verified_source_region,
     )
     if direct is None:
         direct = _legacy_component_binding(
             best_version,
             best_component,
-            column.header_path,
+            semantic_path,
         )
     if direct is None and allow_ordinal_binding:
         direct = _exact_workbook_template_binding(
@@ -546,7 +568,7 @@ def _field_match_values(
             if best_version is not None
             else None
         ),
-        "header_parent": column.header_path[:-1],
+        "header_parent": semantic_path[:-1],
         "base_label": header_semantics.base_label,
         "concept_key": header_semantics.concept_key,
         "role": (
@@ -556,6 +578,77 @@ def _field_match_values(
         ),
         "role_evidence": header_semantics.role_evidence,
     }
+    auxiliary_reason = _deterministic_auxiliary_column_reason(column=column)
+    if auxiliary_reason is not None:
+        return {
+            "observed_data_type": observed_type,
+            "semantic_field_code": None,
+            "semantic_field_version": None,
+            "match_type": MatchType.EXACT,
+            "score_basis_points": 10_000,
+            "context": context,
+            "differences": {
+                "candidates": [],
+                "matched_by": "deterministic_auxiliary_column",
+                "ignored": True,
+                "ignore_reason": auxiliary_reason,
+            },
+            "requires_hermes": False,
+        }
+    region_ignored_paths = {
+        _normalized_label(" / ".join(semantic_header_path(path)))
+        for path in (
+            (best_region_version.source_metadata or {}).get("ignored_header_paths", [])
+            if best_region_version is not None
+            else []
+        )
+        if isinstance(path, list) and semantic_header_path(path)
+    }
+    if full_label := _normalized_label(" / ".join(semantic_path)):
+        if full_label in region_ignored_paths:
+            return {
+                "observed_data_type": observed_type,
+                "semantic_field_code": None,
+                "semantic_field_version": None,
+                "match_type": MatchType.EXACT,
+                "score_basis_points": 10_000,
+                "context": context,
+                "differences": {
+                    "candidates": [],
+                    "matched_by": "approved_region_ignore",
+                    "ignored": True,
+                    "ignore_reason": "not_in_approved_region_plan",
+                },
+                "requires_hermes": False,
+            }
+    ignored_columns = (
+        (best_region_version.source_metadata or {}).get("ignored_columns", [])
+        if best_region_version is not None
+        else []
+    )
+    column_offset = column.column - source_region.region.bounds.min_column
+    header_path_sha256 = _fingerprint(semantic_path)
+    if any(
+        isinstance(rule, dict)
+        and rule.get("column_offset") == column_offset
+        and (verified_source_region or rule.get("header_path_sha256") == header_path_sha256)
+        for rule in ignored_columns
+    ):
+        return {
+            "observed_data_type": observed_type,
+            "semantic_field_code": None,
+            "semantic_field_version": None,
+            "match_type": MatchType.EXACT,
+            "score_basis_points": 10_000,
+            "context": context,
+            "differences": {
+                "candidates": [],
+                "matched_by": "approved_region_ignore",
+                "ignored": True,
+                "ignore_reason": "not_in_approved_region_plan",
+            },
+            "requires_hermes": False,
+        }
     if direct is not None:
         return {
             "observed_data_type": observed_type,
@@ -574,8 +667,11 @@ def _field_match_values(
             },
             "requires_hermes": False,
         }
-    auxiliary_reason = _deterministic_auxiliary_column_reason(column=column)
-    if auxiliary_reason is not None:
+    if (
+        verified_source_region
+        and best_region_version is not None
+        and best_region_version.source == "validated_corpus"
+    ):
         return {
             "observed_data_type": observed_type,
             "semantic_field_code": None,
@@ -585,15 +681,15 @@ def _field_match_values(
             "context": context,
             "differences": {
                 "candidates": [],
-                "matched_by": "deterministic_auxiliary_column",
+                "matched_by": "verified_approved_region_projection",
                 "ignored": True,
-                "ignore_reason": auxiliary_reason,
+                "ignore_reason": "not_in_approved_region_plan",
             },
             "requires_hermes": False,
         }
 
-    full_label = _normalized_label(" / ".join(_normalized_path(column.header_path)))
-    leaf_label = _normalized_label(column.header_path[-1]) if column.header_path else ""
+    full_label = _normalized_label(" / ".join(semantic_path))
+    leaf_label = _normalized_label(semantic_path[-1]) if semantic_path else ""
     base_label = header_semantics.normalized_base_label
     actual_context = (
         str(context["domain"] or ""),
@@ -671,21 +767,21 @@ def _field_match_values(
     second_score = scored[1][0] if len(scored) > 1 else 0
     score_margin = top_score - second_score
     leaders = [item for item in scored if item[0] == top_score]
+    leader_has_semantic_identity = bool(leaders) and (
+        full_label in leaders[0][1].full_paths
+        or leaf_label in leaders[0][1].aliases
+        or base_label in leaders[0][1].aliases
+    )
     deterministic_path_match = (
         len(leaders) == 1
         and "full_header_path" in leaders[0][2]
-        and (
-            observed_type is None
-            or _types_compatible(observed_type, leaders[0][1].data_type)
-        )
+        and (observed_type is None or _types_compatible(observed_type, leaders[0][1].data_type))
     )
-    exact = (
-        deterministic_path_match
-        or (
-            len(leaders) == 1
-            and top_score >= FIELD_DIRECT_REUSE_THRESHOLD
-            and score_margin >= FIELD_DIRECT_REUSE_MARGIN
-        )
+    exact = deterministic_path_match or (
+        len(leaders) == 1
+        and leader_has_semantic_identity
+        and top_score >= FIELD_DIRECT_REUSE_THRESHOLD
+        and score_margin >= FIELD_DIRECT_REUSE_MARGIN
     )
     selected = leaders[0][1] if exact else None
     return {
@@ -724,9 +820,12 @@ def _deterministic_auxiliary_column_reason(*, column: Any) -> str | None:
     Raw cells remain immutable evidence. No content-based inference is allowed
     to turn a headerless physical column into a published business field.
     """
-    if _normalized_path([str(part) for part in column.header_path]):
-        return None
-    return "unnamed_column"
+    header_path = [str(part) for part in column.header_path]
+    if not _normalized_path(header_path):
+        return "unnamed_column"
+    if looks_like_observed_value_header(header_path):
+        return "observed_value_header"
+    return None
 
 
 def profile_regions(profile: WorkbookProfile) -> list[ProfileRegion]:
@@ -750,6 +849,104 @@ def profile_regions(profile: WorkbookProfile) -> list[ProfileRegion]:
     return regions
 
 
+def profile_region_candidates(profile: WorkbookProfile) -> list[ProfileRegion]:
+    """Return every physical Region/header evidence pair retained by parsing."""
+    regions: list[ProfileRegion] = []
+    for sheet in profile.sheets:
+        region_by_id = {region.id: region for region in sheet.region_candidates}
+        for header in sheet.header_candidates:
+            region = region_by_id.get(header.region_id)
+            if region is None or _formula_only_region(sheet, region):
+                continue
+            signature = region_signature(region, header)
+            regions.append(
+                ProfileRegion(
+                    sheet=sheet,
+                    region=region,
+                    header=header,
+                    signature=signature,
+                    fingerprint=_region_fingerprint(signature),
+                )
+            )
+    return regions
+
+
+def _profile_regions_for_matching(
+    profile: WorkbookProfile,
+    *,
+    published_regions: list[RegionTemplateVersion],
+    components: list[tuple[TemplateVersion, TemplateRegionComponent]],
+) -> list[ProfileRegion]:
+    """Choose the header candidate best supported by the published catalog.
+
+    Parsing keeps every candidate as evidence. The matcher must not freeze the
+    parser's generic top-ranked header before it can compare that candidate to
+    approved Region signatures.
+    """
+    defaults = {region.region.id: region.header.id for region in profile_regions(profile)}
+    selected: list[ProfileRegion] = []
+    for sheet in profile.sheets:
+        headers_by_region: dict[str, list[HeaderCandidate]] = defaultdict(list)
+        for header in sheet.header_candidates:
+            headers_by_region[header.region_id].append(header)
+        for region in sheet.region_candidates:
+            if _formula_only_region(sheet, region):
+                continue
+            candidates: list[ProfileRegion] = []
+            for header in headers_by_region.get(region.id, []):
+                signature = region_signature(region, header)
+                candidates.append(
+                    ProfileRegion(
+                        sheet=sheet,
+                        region=region,
+                        header=header,
+                        signature=signature,
+                        fingerprint=_region_fingerprint(signature),
+                    )
+                )
+            if not candidates:
+                continue
+            default_header_id = defaults.get(region.id)
+
+            def rank(
+                candidate: ProfileRegion,
+                default_header_id: str | None = default_header_id,
+            ) -> tuple[int, int, int, float, int, int]:
+                verified = any(
+                    _matches_verified_source_region(
+                        version,
+                        profile=profile,
+                        source_region=candidate,
+                    )
+                    for version in published_regions
+                )
+                exact = any(
+                    version.region_fingerprint == candidate.fingerprint
+                    for version in published_regions
+                ) or any(
+                    component.region_fingerprint == candidate.fingerprint
+                    for _, component in components
+                )
+                score = max(
+                    (
+                        _best_region_version_score(candidate.signature, version)[0]
+                        for version in published_regions
+                    ),
+                    default=0,
+                )
+                return (
+                    int(verified),
+                    int(exact),
+                    score,
+                    candidate.header.confidence,
+                    int(candidate.header.id == default_header_id),
+                    -len(candidate.header.header_rows),
+                )
+
+            selected.append(max(candidates, key=rank))
+    return selected
+
+
 def _known_source_ignored_regions(
     database: Session,
     profile: WorkbookProfile,
@@ -766,8 +963,7 @@ def _known_source_ignored_regions(
         metadata = version.source_metadata or {}
         members = metadata.get("members", [])
         if not any(
-            isinstance(member, dict)
-            and member.get("source_sha256") == profile.source_sha256
+            isinstance(member, dict) and member.get("source_sha256") == profile.source_sha256
             for member in members
         ):
             continue
@@ -821,16 +1017,10 @@ def _matches_form_anchors(
             or "label_column_offset" not in selector
         ):
             continue
-        row = source_region.region.bounds.min_row + int(
-            selector["label_row_offset"]
-        )
-        column = source_region.region.bounds.min_column + int(
-            selector["label_column_offset"]
-        )
+        row = source_region.region.bounds.min_row + int(selector["label_row_offset"])
+        column = source_region.region.bounds.min_column + int(selector["label_column_offset"])
         cell = cells.get((row, column))
-        expected = _normalized_label(
-            str(binding.get("header_path", [""])[-1])
-        )
+        expected = _normalized_label(str(binding.get("header_path", [""])[-1]))
         actual = _normalized_label(str(cell.display_value)) if cell is not None else ""
         anchors.append(bool(expected and actual == expected))
     return len(anchors) >= 2 and all(anchors)
@@ -945,11 +1135,7 @@ def _header_set(signature: dict[str, Any]) -> set[str]:
         marker in title for marker in ("表", "名册", "台账", "登记", "汇总", "清册")
     ):
         paths = [path[len(common_prefix) :] for path in paths]
-    return {
-        " / ".join(path)
-        for path in paths
-        if path
-    }
+    return {" / ".join(path) for path in paths if path}
 
 
 def _component_score(
@@ -962,14 +1148,9 @@ def _component_score(
     header_score = (
         round(10_000 * len(actual_headers & expected_headers) / len(union)) if union else 0
     )
-    structural_mismatches = [
-        key
-        for key in ("columns",)
-        if actual.get(key) != expected.get(key)
-    ]
-    if (
-        actual_headers != expected_headers
-        and actual.get("header_depth") != expected.get("header_depth")
+    structural_mismatches = [key for key in ("columns",) if actual.get(key) != expected.get(key)]
+    if actual_headers != expected_headers and actual.get("header_depth") != expected.get(
+        "header_depth"
     ):
         structural_mismatches.append("header_depth")
     if (
@@ -996,6 +1177,52 @@ def _region_version_signature(
         "header_depth": max((len(path) for path in headers), default=0),
         "headers": headers,
     }
+
+
+def _region_version_signatures(
+    version: RegionTemplateVersion,
+) -> list[dict[str, Any]]:
+    variants = [version.header_signature]
+    metadata_variants = (version.source_metadata or {}).get("header_variants", [])
+    if isinstance(metadata_variants, list):
+        variants.extend(variant for variant in metadata_variants if isinstance(variant, list))
+    signatures: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for variant in variants:
+        headers = [
+            _normalized_path([str(part) for part in path])
+            for path in variant
+            if isinstance(path, list)
+        ]
+        signature = {
+            "kind": version.region_kind,
+            "columns": len(headers),
+            "header_depth": max((len(path) for path in headers), default=0),
+            "headers": headers,
+        }
+        fingerprint = _fingerprint(signature)
+        if fingerprint not in seen:
+            seen.add(fingerprint)
+            signatures.append(signature)
+    return signatures
+
+
+def _best_region_version_score(
+    actual: dict[str, Any],
+    version: RegionTemplateVersion,
+) -> tuple[int, dict[str, Any]]:
+    return max(
+        (_component_score(actual, expected) for expected in _region_version_signatures(version)),
+        key=lambda result: result[0],
+        default=(
+            0,
+            {
+                "missing_headers": [],
+                "new_headers": sorted(_header_set(actual)),
+                "structural_mismatches": [],
+            },
+        ),
+    )
 
 
 def _legacy_region_references(
@@ -1295,7 +1522,7 @@ def match_profile(
             )
         )
     )
-    field_catalog = _published_field_catalog(database, published)
+    field_catalog = _published_field_catalog(database, published, published_regions)
     ignore_catalog = _published_ignore_catalog(database)
     workbook_exact = next(
         (candidate for candidate in published if candidate.layout_fingerprint == fingerprint),
@@ -1304,7 +1531,11 @@ def match_profile(
     ignored_region_ids = _known_source_ignored_regions(database, profile)
     source_regions = [
         source_region
-        for source_region in profile_regions(profile)
+        for source_region in _profile_regions_for_matching(
+            profile,
+            published_regions=published_regions,
+            components=components,
+        )
         if source_region.region.id not in ignored_region_ids
     ]
     ignored_auxiliary_regions = [
@@ -1322,22 +1553,40 @@ def match_profile(
 
     region_matches: list[RegionTemplateMatch] = []
     for source_region in source_regions:
-        exact_region = next(
-            (
-                candidate
-                for candidate in published_regions
-                if _matches_verified_source_region(
-                    candidate,
-                    profile=profile,
-                    source_region=source_region,
-                )
-                or _matches_form_anchors(
-                    candidate,
-                    source_region=source_region,
-                )
-                or candidate.region_fingerprint == source_region.fingerprint
+        precomputed_field_values: dict[str, dict[str, Any]] = {}
+        exact_region_candidates = [
+            candidate
+            for candidate in published_regions
+            if _matches_verified_source_region(
+                candidate,
+                profile=profile,
+                source_region=source_region,
+            )
+            or _matches_form_anchors(
+                candidate,
+                source_region=source_region,
+            )
+            or candidate.region_fingerprint == source_region.fingerprint
+        ]
+        source_column_ids = {column.source_column_id for column in source_region.header.columns}
+        exact_region = max(
+            exact_region_candidates,
+            key=lambda candidate: (
+                int(
+                    _matches_verified_source_region(
+                        candidate,
+                        profile=profile,
+                        source_region=source_region,
+                    )
+                ),
+                int(candidate.source == "validated_corpus"),
+                sum(
+                    str(binding.get("source_column_id") or "") in source_column_ids
+                    for binding in candidate.field_bindings
+                ),
+                str(candidate.region_template_id),
             ),
-            None,
+            default=None,
         )
         exact_legacy = next(
             (
@@ -1383,9 +1632,9 @@ def match_profile(
             match_type = MatchType.EXACT
         else:
             for candidate_region in published_regions:
-                candidate_score, candidate_differences = _component_score(
+                candidate_score, candidate_differences = _best_region_version_score(
                     source_region.signature,
-                    _region_version_signature(candidate_region),
+                    candidate_region,
                 )
                 if candidate_score > best_score:
                     best_region_version = candidate_region
@@ -1417,6 +1666,75 @@ def match_profile(
                 match_type = MatchType.EXACT
             elif best_score > 0:
                 match_type = MatchType.PARTIAL
+        if published_regions and match_type == MatchType.PARTIAL:
+            semantic_matches: list[
+                tuple[
+                    int,
+                    str,
+                    RegionTemplateVersion,
+                    dict[str, dict[str, Any]],
+                    dict[str, Any],
+                ]
+            ] = []
+            for candidate_region in published_regions:
+                candidate_values = {
+                    column.source_column_id: _field_match_values(
+                        source_region=source_region,
+                        column=column,
+                        best_region_version=candidate_region,
+                        best_version=None,
+                        best_component=None,
+                        catalog=field_catalog,
+                        ignore_catalog=ignore_catalog,
+                        allow_ordinal_binding=False,
+                    )
+                    for column in source_region.header.columns
+                }
+                actual_fields = Counter(
+                    str(values["semantic_field_code"])
+                    for values in candidate_values.values()
+                    if values["semantic_field_code"] is not None
+                )
+                expected_fields = Counter(
+                    str(binding["semantic_field_code"])
+                    for binding in candidate_region.field_bindings
+                )
+                if (
+                    expected_fields
+                    and actual_fields == expected_fields
+                    and all(not values["requires_hermes"] for values in candidate_values.values())
+                ):
+                    candidate_score, candidate_differences = _best_region_version_score(
+                        source_region.signature,
+                        candidate_region,
+                    )
+                    semantic_matches.append(
+                        (
+                            candidate_score,
+                            str(candidate_region.region_template_id),
+                            candidate_region,
+                            candidate_values,
+                            candidate_differences,
+                        )
+                    )
+            if semantic_matches:
+                (
+                    _,
+                    _,
+                    best_region_version,
+                    precomputed_field_values,
+                    semantic_differences,
+                ) = max(semantic_matches, key=lambda row: (row[0], row[1]))
+                best_version, best_component = _legacy_region_references(
+                    database,
+                    best_region_version,
+                )
+                differences = {
+                    **semantic_differences,
+                    "matched_by": "semantic_field_signature",
+                }
+                match_type = MatchType.EXACT
+                best_score = 10_000
         if not published_regions and workbook_exact is not None and best_version is None:
             best_version = workbook_exact
             best_score = 10_000
@@ -1483,6 +1801,7 @@ def match_profile(
         if form_bindings:
             continue
         for column in source_region.header.columns:
+            field_values = precomputed_field_values.get(column.source_column_id)
             database.add(
                 FieldMatch(
                     item_id=item_id,
@@ -1492,15 +1811,19 @@ def match_profile(
                     source_column_id=column.source_column_id,
                     header_path=column.header_path,
                     matcher_version=FIELD_MATCHER_VERSION,
-                    **_field_match_values(
-                        source_region=source_region,
-                        column=column,
-                        best_region_version=best_region_version,
-                        best_version=best_version,
-                        best_component=best_component,
-                        catalog=field_catalog,
-                        ignore_catalog=ignore_catalog,
-                        allow_ordinal_binding=match_type == MatchType.EXACT,
+                    **(
+                        field_values
+                        if field_values is not None
+                        else _field_match_values(
+                            source_region=source_region,
+                            column=column,
+                            best_region_version=best_region_version,
+                            best_version=best_version,
+                            best_component=best_component,
+                            catalog=field_catalog,
+                            ignore_catalog=ignore_catalog,
+                            allow_ordinal_binding=match_type == MatchType.EXACT,
+                        )
                     ),
                 )
             )

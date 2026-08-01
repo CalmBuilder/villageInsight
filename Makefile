@@ -4,7 +4,7 @@ install:
 	uv sync --all-extras
 
 dev:
-	docker compose --profile application up --build
+	docker compose --env-file docker/.env --profile application up --build
 
 infra-up:
 	docker compose --env-file docker/.env up -d postgres
@@ -40,6 +40,6 @@ frontend-dev:
 	cd frontend && npm run dev
 
 frontend-check:
-	cd frontend && npm run type-check && npm run test && npm run build
+	cd frontend && npm run lint && npm run type-check && npm run test && npm run build
 
 check: lint type-check test frontend-check

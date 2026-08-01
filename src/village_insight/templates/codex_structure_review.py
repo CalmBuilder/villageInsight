@@ -11,6 +11,7 @@ from village_insight.parsing.contracts import (
     SheetProfile,
 )
 from village_insight.parsing.router import ParserRouter
+from village_insight.source_paths import resolve_source_path
 
 CONTRACT_VERSION = "codex-structure-review/v1"
 REVIEWER_VERSION = "codex-four-layer-source-review/v1"
@@ -241,7 +242,7 @@ def build_review(
         hermes_route = hermes_by_route.get(route_code)
         if hermes_route is None:
             raise ValueError(f"Hermes evidence is missing for {route_code}")
-        path = Path(str(hermes_route["source_path"]))
+        path = resolve_source_path(str(hermes_route["source_path"]))
         profile = ParserRouter().profile(path)
         region_lookup = {
             region.id: (sheet, region)

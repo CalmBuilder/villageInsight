@@ -3,7 +3,7 @@ import type { QuestionRun } from "../lib/api";
 import {
   formatAnswerForClipboard,
   formatQueryDuration,
-} from "./QuestionPage";
+} from "./questionFormatting";
 import { questionInputKeyAction } from "./questionInput";
 
 test("copied answer contains visible rows but omits internal record identifiers", () => {

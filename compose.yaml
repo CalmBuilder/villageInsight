@@ -1,6 +1,9 @@
 include:
   - ./docker/docker-compose-base.yml
 
+x-application-database-environment: &application-database-environment
+  DATABASE_URL: ${POSTGRES_APPLICATION_URL:-postgresql+psycopg://village_insight:village_insight@postgres:5432/village_insight}
+
 services:
   api:
     profiles: ["application"]
@@ -8,9 +11,9 @@ services:
       context: .
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://village_insight:village_insight@postgres:5432/village_insight
+      <<: *application-database-environment
       UPLOAD_ROOT: /data/uploads
-      SECRET_KEY_PATH: /data/uploads/.secrets/settings.key
+      SECRET_KEY_PATH: /data/secrets/settings.key
       IMPORT_ROOTS: /data/import
     command: >
       sh -c "alembic upgrade head &&
@@ -22,6 +25,8 @@ services:
       - village-insight
     volumes:
       - upload_data:/data/uploads
+      - ./data/server-transfer/current:/data/server-transfer:ro
+      - ./data/secrets:/data/secrets:ro
       - ./data/import:/data/import:ro
     ports:
       - "8000:8000"
@@ -33,9 +38,9 @@ services:
       context: .
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://village_insight:village_insight@postgres:5432/village_insight
+      <<: *application-database-environment
       UPLOAD_ROOT: /data/uploads
-      SECRET_KEY_PATH: /data/uploads/.secrets/settings.key
+      SECRET_KEY_PATH: /data/secrets/settings.key
       IMPORT_ROOTS: /data/import
     command: >
       sh -c 'village-insight-worker --lane parse
@@ -47,6 +52,8 @@ services:
       - village-insight
     volumes:
       - upload_data:/data/uploads
+      - ./data/server-transfer/current:/data/server-transfer:ro
+      - ./data/secrets:/data/secrets:ro
       - ./data/import:/data/import:ro
     restart: unless-stopped
 
@@ -56,9 +63,9 @@ services:
       context: .
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://village_insight:village_insight@postgres:5432/village_insight
+      <<: *application-database-environment
       UPLOAD_ROOT: /data/uploads
-      SECRET_KEY_PATH: /data/uploads/.secrets/settings.key
+      SECRET_KEY_PATH: /data/secrets/settings.key
       IMPORT_ROOTS: /data/import
     command: >
       sh -c 'village-insight-worker --lane hermes
@@ -70,6 +77,8 @@ services:
       - village-insight
     volumes:
       - upload_data:/data/uploads
+      - ./data/server-transfer/current:/data/server-transfer:ro
+      - ./data/secrets:/data/secrets:ro
       - ./data/import:/data/import:ro
     restart: unless-stopped
 
@@ -79,9 +88,9 @@ services:
       context: .
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://village_insight:village_insight@postgres:5432/village_insight
+      <<: *application-database-environment
       UPLOAD_ROOT: /data/uploads
-      SECRET_KEY_PATH: /data/uploads/.secrets/settings.key
+      SECRET_KEY_PATH: /data/secrets/settings.key
       IMPORT_ROOTS: /data/import
     command: >
       sh -c 'village-insight-worker --lane materialize
@@ -93,6 +102,8 @@ services:
       - village-insight
     volumes:
       - upload_data:/data/uploads
+      - ./data/server-transfer/current:/data/server-transfer:ro
+      - ./data/secrets:/data/secrets:ro
       - ./data/import:/data/import:ro
     restart: unless-stopped
 

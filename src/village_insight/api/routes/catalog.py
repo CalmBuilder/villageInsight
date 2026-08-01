@@ -75,6 +75,7 @@ from village_insight.question_source_versions import (
     SourceSupersessionError,
     declare_source_supersession,
 )
+from village_insight.source_paths import SourcePathError, resolve_source_path
 from village_insight.templates.field_variants import build_field_variant
 from village_insight.templates.lifecycle import (
     LifecycleError,
@@ -509,6 +510,8 @@ def field_read(field: SemanticField) -> SemanticFieldRead:
         aliases=version.aliases,
         validators=version.validators,
         variants=version.variants,
+        source=version.source,
+        source_metadata=version.source_metadata,
         created_at=field.created_at,
         updated_at=field.updated_at,
     )
@@ -896,6 +899,8 @@ def get_field_details(
                 unit_dimension=version.unit_dimension,
                 alias_count=len(version.aliases),
                 variant_count=len(version.variants),
+                source=version.source,
+                source_metadata=version.source_metadata,
                 created_at=version.created_at,
             )
             for version in sorted(
@@ -1028,9 +1033,13 @@ def get_region_template_source_preview(
     if evidence is None:
         raise HTTPException(status_code=409, detail="该模板尚未保存可回看的源文件证据")
 
-    source_path = Path(str(evidence["representative_path"])).resolve()
-    if not source_path.is_file():
-        raise HTTPException(status_code=409, detail="模板源文件已移动，暂时无法回看")
+    try:
+        source_path = resolve_source_path(str(evidence["representative_path"]))
+    except SourcePathError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="模板源文件已移动，暂时无法回看",
+        ) from exc
     try:
         profile = ParserRouter().profile(source_path)
     except (OSError, ValueError) as exc:
@@ -1441,7 +1450,13 @@ def get_workbook_route_source_preview(
     ]
     source_profile = None
     warning = None
-    available_source = next((path for path in source_paths if path.is_file()), None)
+    available_source = None
+    for path in source_paths:
+        try:
+            available_source = resolve_source_path(path)
+            break
+        except SourcePathError:
+            continue
     if available_source is not None:
         try:
             source_profile = ParserRouter().profile(available_source)

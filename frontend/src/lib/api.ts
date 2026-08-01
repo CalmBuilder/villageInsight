@@ -9,6 +9,7 @@ export type Batch = {
   total_files: number;
   completed_files: number;
   failed_files: number;
+  deleted_files: number;
   upload_failures?: string[];
   created_at: string;
   updated_at: string;
@@ -94,6 +95,14 @@ export type BatchItem = {
   parser_name: string | null;
   error_code: string | null;
   error_message: string | null;
+  build_result_deletion_status:
+    | "active"
+    | "deletion_pending"
+    | "deleting"
+    | "deleted"
+    | "deletion_failed";
+  build_result_deleted_at: string | null;
+  build_result_deleted_by_user_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -116,6 +125,7 @@ export type FileLedgerItem = BatchItem & {
   hermes_call_count: number;
   record_count: number;
   partial_record_count: number;
+  governance_pending: boolean;
   sheet_count: number | null;
 };
 
@@ -124,7 +134,21 @@ export type FileLedgerPage = {
   total: number;
   limit: number;
   offset: number;
-  counts: Record<"all" | "imported" | "processing" | "hermes" | "review" | "failed", number>;
+  counts: Record<
+    "all" | "imported" | "partial" | "processing" | "hermes" | "review" | "failed",
+    number
+  >;
+};
+
+export type BuildResultDeletion = {
+  id: string;
+  item_id: string;
+  status: "pending" | "deleting" | "completed" | "failed";
+  deleted_counts: Record<string, number>;
+  retired_counts: Record<string, number>;
+  error_code: string | null;
+  requested_at: string;
+  completed_at: string | null;
 };
 
 export type TemplateMatch = {
@@ -391,6 +415,8 @@ export type SemanticField = {
   unit_dimension: string | null;
   aliases: string[];
   validators: Array<Record<string, unknown>>;
+  source: string;
+  source_metadata: Record<string, unknown>;
   variants: Array<{
     id: string;
     kind: "alias" | "header_path" | "role_context";
@@ -420,6 +446,8 @@ export type SemanticFieldDetail = {
     unit_dimension: string | null;
     alias_count: number;
     variant_count: number;
+    source: string;
+    source_metadata: Record<string, unknown>;
     created_at: string;
   }>;
   referenced_by: Array<{
@@ -718,6 +746,7 @@ export type LLMConfiguration = {
   thinking_protocol: "none" | "deepseek";
   api_key_configured: boolean;
   api_key_hint: string | null;
+  api_key_reentry_required: boolean;
   max_tokens: number | null;
   source: string;
 };
@@ -736,6 +765,7 @@ export type LLMProviderPreset = {
   billing_notice: string | null;
   api_key_configured: boolean;
   api_key_hint: string | null;
+  api_key_reentry_required: boolean;
 };
 
 export type LLMConfigurationInput = {
@@ -1096,6 +1126,17 @@ export async function reimportFile(
   return responseJson<BatchItem>(
     await fetch(`/api/batches/${batchId}/items/${itemId}/reimport`, {
       method: "POST",
+    }),
+  );
+}
+
+export async function deleteBuildResult(
+  batchId: string,
+  itemId: string,
+): Promise<BuildResultDeletion> {
+  return responseJson<BuildResultDeletion>(
+    await fetch(`/api/batches/${batchId}/items/${itemId}/build-result`, {
+      method: "DELETE",
     }),
   );
 }

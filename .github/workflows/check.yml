@@ -1,0 +1,115 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: village_insight
+          POSTGRES_USER: village_insight
+          POSTGRES_PASSWORD: village_insight
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U village_insight -d village_insight"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql+psycopg://village_insight:village_insight@localhost:5432/village_insight
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.6"
+          enable-cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Python dependencies
+        run: uv sync --all-extras --frozen
+
+      - name: Check Python
+        run: |
+          uv run ruff check .
+          uv run mypy src
+          uv run pytest
+
+      - name: Validate PostgreSQL migrations
+        run: uv run alembic upgrade head
+
+      - name: Check frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run type-check
+          npm run test
+          npm run build
+
+      - name: Validate operational configuration
+        run: |
+          cp .env.example .env
+          cp docker/.env.example docker/.env
+          bash -n app.sh
+          docker compose --env-file docker/.env --profile application config --quiet
+          docker compose --env-file docker/.env --profile application \
+            config --format json > /tmp/village-insight-compose-default.json
+          POSTGRES_DATA_DIR=/opt/village-insight/data/postgres/data \
+            docker compose --env-file docker/.env --profile application \
+            config --format json > /tmp/village-insight-compose.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          default_payload = json.loads(
+              Path("/tmp/village-insight-compose-default.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          payload = json.loads(
+              Path("/tmp/village-insight-compose.json").read_text(encoding="utf-8")
+          )
+          default_mount = default_payload["services"]["postgres"]["volumes"][0]
+          assert default_mount["type"] == "volume"
+          assert default_mount["source"] == "postgres_data"
+          postgres = payload["services"]["postgres"]
+          assert postgres["ports"][0]["host_ip"] == "127.0.0.1"
+          assert postgres["volumes"][0]["type"] == "bind"
+          assert postgres["volumes"][0]["source"] == (
+              "/opt/village-insight/data/postgres/data"
+          )
+          expected_url = (
+              "postgresql+psycopg://village_insight:village_insight@"
+              "postgres:5432/village_insight"
+          )
+          for service in ("api", "worker-parse", "worker-hermes", "worker-materialize"):
+              assert payload["services"][service]["environment"]["DATABASE_URL"] == expected_url
+          PY
+
+      - name: Validate tracked synthetic sample assets
+        run: |
+          test -f sample-data/synthetic-village-v1/manifest.json
+          test -f sample-data/synthetic-village-v1/data/演示一村户籍人口.xlsx
+          test -f sample-data/synthetic-village-v1/data/演示一村党员名册.xlsx
+          if git check-ignore -q sample-data/synthetic-village-v1/manifest.json; then
+            echo "sample-data must not be ignored"
+            exit 1
+          fi

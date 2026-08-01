@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import uuid
 from importlib.metadata import PackageNotFoundError, version
@@ -33,6 +34,7 @@ from village_insight.db.models import (
 )
 from village_insight.hermes.runtime import (
     HermesCallPolicy,
+    HermesInvalidResponseError,
     HermesRuntime,
     HermesUnavailableError,
 )
@@ -43,16 +45,29 @@ from village_insight.templates.contracts import (
     TemplateDefinition,
     TemplateFieldBinding,
 )
-from village_insight.templates.field_semantics import normalize_role_code
+from village_insight.templates.field_semantics import (
+    normalize_role_code,
+    semantic_candidate_is_compatible,
+)
 from village_insight.templates.field_variants import build_field_variant
+from village_insight.templates.sources import (
+    AUTO_GOVERNANCE_SOURCE,
+    MANUAL_GOVERNANCE_SOURCE,
+    source_metadata,
+)
 
-PROMPT_VERSION = "template-diff/v15"
-SCHEMA_VERSION = "template-diff-result/v6"
+PROMPT_VERSION = "template-diff/v19"
+SCHEMA_VERSION = "template-diff-result/v9"
+STRUCTURE_CHECKPOINT_SCHEMA_VERSION = "workbook-structure-checkpoint/v2"
+SEMANTIC_CHUNK_CHECKPOINT_SCHEMA_VERSION = "semantic-chunk-checkpoint/v2"
+CACHE_COMPATIBILITY_VERSION = "hermes-recognition-cache/v3"
+NORMALIZATION_POLICY_VERSION = "recognition-normalization/v3"
+VALIDATION_POLICY_VERSION = "recognition-validation/v3"
 REVIEW_CONFIDENCE_THRESHOLD = 0.85
 MAX_SAMPLE_ROWS_PER_REGION = 3
 MAX_SAMPLE_CELLS = 24
 MAX_MERGE_EVIDENCE = 16
-MAX_FIELDS_PER_HERMES_CALL = 3
+MAX_FIELDS_PER_HERMES_CALL = 5
 INITIAL_PREVIEW_ROWS = 10
 INITIAL_PREVIEW_COLUMNS = 40
 MAX_INITIAL_PREVIEW_CELLS = 800
@@ -60,6 +75,8 @@ MAX_RANGE_REQUESTS = 3
 MAX_RANGE_ROWS = 30
 MAX_RANGE_COLUMNS = 40
 MAX_RANGE_EVIDENCE_CELLS = 800
+
+logger = logging.getLogger(__name__)
 
 
 class SemanticCandidateSummary(BaseModel):
@@ -333,6 +350,13 @@ class WorkbookStructureDecision(BaseModel):
     confidence: float = Field(ge=0, le=1)
 
 
+class StructureRecognitionCheckpoint(BaseModel):
+    structure_decision: WorkbookStructureDecision
+    enriched_request: TemplateDiffRequest
+    requires_governance: bool = False
+    performed_models: list[str] = Field(default_factory=list)
+
+
 class TemplateDiffResult(BaseModel):
     contract_version: Literal["template-diff-result/v2"] = "template-diff-result/v2"
     template_suggestion: TemplateSuggestion | None = None
@@ -347,12 +371,83 @@ class TemplateDiffResult(BaseModel):
     structure_decision: WorkbookStructureDecision | None = None
 
 
+class SemanticChunkCheckpoint(BaseModel):
+    result: TemplateDiffResult
+    contract_repair_invalid_response: bool = False
+    performed_models: list[str] = Field(default_factory=list)
+
+
 class RecognitionValidationError(ValueError):
     pass
 
 
 class ProposalResolutionError(ValueError):
     pass
+
+
+_TEMPLATE_SUGGESTION_REQUIRED_ERROR = (
+    "template suggestion is required when no template matches"
+)
+_TEMPLATE_SUGGESTION_MISSING_REASON = "HERMES_TEMPLATE_SUGGESTION_MISSING"
+
+
+def _candidate_is_compatible(
+    header: HeaderEvidenceSummary,
+    candidate: SemanticCandidateSummary,
+) -> bool:
+    if (
+        header.observed_data_type is not None
+        and header.observed_data_type != candidate.data_type
+        and {header.observed_data_type, candidate.data_type} != {"integer", "decimal"}
+    ):
+        return False
+    return semantic_candidate_is_compatible(
+        header_path=header.header_path,
+        candidate_labels=[candidate.name, *candidate.aliases],
+        reasons=candidate.reasons,
+    )
+
+
+def _is_missing_template_suggestion_error(error: Exception) -> bool:
+    return str(error) == _TEMPLATE_SUGGESTION_REQUIRED_ERROR
+
+
+def _field_contract_repair_details(
+    error: RecognitionValidationError,
+) -> tuple[dict[str, object], dict[str, object]]:
+    if _is_missing_template_suggestion_error(error):
+        return (
+            {
+                "code": "TEMPLATE_SUGGESTION_REQUIRED",
+                "message": str(error),
+            },
+            {
+                "required_path": "template_suggestion",
+                "required_fields": [
+                    "template_code",
+                    "template_name",
+                    "domain",
+                    "record_type",
+                    "confidence",
+                ],
+                "expected_outcome": (
+                    "When match_type is none, add one reusable template suggestion while "
+                    "preserving all valid field_decisions and layout_decisions."
+                ),
+            },
+        )
+    return (
+        {
+            "code": "FIELD_CHUNK_CONTRACT_INVALID",
+            "message": str(error),
+        },
+        {
+            "required_path": "$",
+            "expected_outcome": (
+                "Correct only the reported deterministic contract conflict."
+            ),
+        },
+    )
 
 
 _SAFE_CATEGORY_VALUES = {
@@ -557,13 +652,24 @@ def fulfill_range_requests(
     evidence: list[SheetRangeEvidence] = []
     cell_count = 0
     seen: set[tuple[str, int, int, int, int]] = set()
+    sheets_by_id = {sheet.id: sheet for sheet in profile.sheets}
     for request in requests:
+        sheet = sheets_by_id.get(request.sheet_id)
+        bounds = sheet.observed_bounds if sheet is not None else None
+        if bounds is None:
+            continue
+        start_row = max(request.start_row, bounds.min_row)
+        end_row = min(request.end_row, bounds.max_row)
+        start_column = max(request.start_column, bounds.min_column)
+        end_column = min(request.end_column, bounds.max_column)
+        if end_row < start_row or end_column < start_column:
+            continue
         key = (
             request.sheet_id,
-            request.start_row,
-            request.end_row,
-            request.start_column,
-            request.end_column,
+            start_row,
+            end_row,
+            start_column,
+            end_column,
         )
         if key in seen:
             continue
@@ -571,10 +677,10 @@ def fulfill_range_requests(
         item = _range_evidence(
             profile,
             sheet_id=request.sheet_id,
-            start_row=request.start_row,
-            end_row=request.end_row,
-            start_column=request.start_column,
-            end_column=request.end_column,
+            start_row=start_row,
+            end_row=end_row,
+            start_column=start_column,
+            end_column=end_column,
             purpose="requested",
         )
         cell_count += sum(len(row.cells) for row in item.rows)
@@ -726,6 +832,54 @@ def normalize_ignored_structure_ranges(
     return result.model_copy(update={"layout_decisions": normalized}), changed
 
 
+def complete_omitted_structure_regions(
+    request: TemplateDiffRequest,
+    result: WorkbookStructureDecision,
+) -> tuple[WorkbookStructureDecision, bool]:
+    """Turn omitted high-recall candidates into explicit reviewable noise.
+
+    Raw evidence remains available and the caller marks the result for governance.
+    This avoids spending another model call merely to satisfy exact coverage while
+    never silently materializing a Region the model did not classify.
+    """
+    expected_ids = {region.candidate_id for region in request.regions}
+    supplied_ids = [layout.region_candidate_id for layout in result.layout_decisions]
+    if len(supplied_ids) != len(set(supplied_ids)) or not set(supplied_ids) <= expected_ids:
+        return result, False
+    missing_ids = expected_ids - set(supplied_ids)
+    if not missing_ids:
+        return result, False
+    header_by_region: dict[str, str] = {}
+    for header in request.headers:
+        header_by_region.setdefault(
+            header.region_candidate_id,
+            header.header_candidate_id,
+        )
+    if any(region_id not in header_by_region for region_id in missing_ids):
+        return result, False
+    additions: list[LayoutDecision] = []
+    for region in request.regions:
+        if region.candidate_id not in missing_ids:
+            continue
+        _, min_row, _, max_row = range_boundaries(region.range)
+        header_candidate_id = header_by_region[region.candidate_id]
+        additions.append(
+            LayoutDecision(
+                region_candidate_id=region.candidate_id,
+                header_candidate_id=header_candidate_id,
+                data_start_row=min_row,
+                data_end_row=max_row,
+                classification="noise",
+                materialize=False,
+                confidence=0.0,
+                evidence_ids=[region.candidate_id, header_candidate_id],
+            )
+        )
+    return result.model_copy(
+        update={"layout_decisions": [*result.layout_decisions, *additions]}
+    ), True
+
+
 def normalize_structure_data_ranges(
     request: TemplateDiffRequest,
     result: WorkbookStructureDecision,
@@ -740,8 +894,14 @@ def normalize_structure_data_ranges(
             normalized.append(layout)
             continue
         _, min_row, _, max_row = range_boundaries(region.range)
-        start_row = max(min_row, layout.data_start_row)
-        end_row = min(max_row, layout.data_end_row)
+        start_row = min(max(layout.data_start_row, min_row), max_row)
+        end_row = min(max(layout.data_end_row, min_row), max_row)
+        unusable_range = (
+            layout.data_end_row < layout.data_start_row or start_row > end_row
+        )
+        if unusable_range:
+            start_row = min_row
+            end_row = max_row
         excluded_rows = [
             row for row in layout.excluded_rows if start_row <= row <= end_row
         ]
@@ -755,11 +915,127 @@ def normalize_structure_data_ranges(
                 update={
                     "data_start_row": start_row,
                     "data_end_row": end_row,
-                    "excluded_rows": excluded_rows,
+                    "excluded_rows": [] if unusable_range else excluded_rows,
+                    **(
+                        {
+                            "classification": "noise",
+                            "materialize": False,
+                            "confidence": 0.0,
+                        }
+                        if unusable_range
+                        else {}
+                    ),
                 }
             )
         )
     return result.model_copy(update={"layout_decisions": normalized}), changed
+
+
+def normalize_structure_header_boundaries(
+    profile: WorkbookProfile,
+    result: WorkbookStructureDecision,
+) -> tuple[WorkbookStructureDecision, bool]:
+    """Keep materialized rows strictly below the selected immutable header."""
+    headers = {
+        candidate.id: candidate
+        for sheet in profile.sheets
+        for candidate in select_header_candidates(sheet.header_candidates)
+    }
+    normalized: list[LayoutDecision] = []
+    changed = False
+    for layout in result.layout_decisions:
+        header = headers.get(layout.header_candidate_id)
+        if header is None or not layout.materialize:
+            normalized.append(layout)
+            continue
+        first_data_row = max(header.header_rows) + 1
+        if layout.data_start_row >= first_data_row:
+            normalized.append(layout)
+            continue
+        changed = True
+        if first_data_row <= layout.data_end_row:
+            normalized.append(
+                layout.model_copy(
+                    update={
+                        "data_start_row": first_data_row,
+                        "excluded_rows": [
+                            row
+                            for row in layout.excluded_rows
+                            if first_data_row <= row <= layout.data_end_row
+                        ],
+                    }
+                )
+            )
+        else:
+            normalized.append(
+                layout.model_copy(
+                    update={
+                        "data_start_row": layout.data_end_row,
+                        "classification": "noise",
+                        "materialize": False,
+                        "confidence": 0.0,
+                        "excluded_rows": [],
+                    }
+                )
+            )
+    return result.model_copy(update={"layout_decisions": normalized}), changed
+
+
+def normalize_structure_row_roles(
+    profile: WorkbookProfile,
+    request: TemplateDiffRequest,
+    result: WorkbookStructureDecision,
+) -> tuple[WorkbookStructureDecision, bool]:
+    """Clamp optional explanatory row roles without changing layout ownership."""
+    bounds_by_sheet = {
+        sheet.id: sheet.observed_bounds
+        for sheet in profile.sheets
+        if sheet.observed_bounds is not None
+    }
+    valid_evidence_ids = _request_evidence_ids(request)
+    candidates: list[RowRoleSegment] = []
+    changed = False
+    for segment in result.row_role_segments:
+        bounds = bounds_by_sheet.get(segment.sheet_id)
+        if bounds is None:
+            changed = True
+            continue
+        start_row = max(segment.start_row, bounds.min_row)
+        end_row = min(segment.end_row, bounds.max_row)
+        if end_row < start_row:
+            changed = True
+            continue
+        evidence_ids = [
+            evidence_id
+            for evidence_id in segment.evidence_ids
+            if evidence_id in valid_evidence_ids
+        ]
+        changed = changed or (
+            start_row != segment.start_row
+            or end_row != segment.end_row
+            or evidence_ids != segment.evidence_ids
+        )
+        candidates.append(
+            segment.model_copy(
+                update={
+                    "start_row": start_row,
+                    "end_row": end_row,
+                    "evidence_ids": evidence_ids,
+                }
+            )
+        )
+    normalized: list[RowRoleSegment] = []
+    latest_end_by_sheet: dict[str, int] = {}
+    ordered = sorted(
+        candidates,
+        key=lambda item: (item.sheet_id, item.start_row, item.end_row),
+    )
+    for segment in ordered:
+        if segment.start_row <= latest_end_by_sheet.get(segment.sheet_id, 0):
+            return result.model_copy(update={"row_role_segments": []}), True
+        normalized.append(segment)
+        latest_end_by_sheet[segment.sheet_id] = segment.end_row
+    return result.model_copy(update={"row_role_segments": normalized}), changed
 
 
 def normalize_structure_merge_references(
@@ -769,6 +1045,7 @@ def normalize_structure_merge_references(
 ) -> tuple[WorkbookStructureDecision, bool]:
     """Resolve unambiguous A1 ranges to supplied immutable merge evidence IDs."""
     valid_merge_ids = set(request.merge_ids)
+    valid_source_column_ids = {header.source_column_id for header in request.headers}
     sheet_by_id = {sheet.id: sheet for sheet in profile.sheets}
     region_sheet = {region.candidate_id: region.sheet_id for region in request.regions}
     changed = False
@@ -786,20 +1063,39 @@ def normalize_structure_merge_references(
                 ).append(physical_merge.id)
         normalized_merges: list[MergeDecision] = []
         for decision_merge in layout.merge_decisions:
+            resolved_merge_id: str | None = None
             if decision_merge.merge_id in valid_merge_ids:
-                normalized_merges.append(decision_merge)
+                resolved_merge_id = decision_merge.merge_id
+            else:
+                try:
+                    coordinate = range_boundaries(decision_merge.merge_id)
+                except ValueError:
+                    coordinate = None
+                candidates = merge_ids_by_range.get(coordinate, []) if coordinate else []
+                if len(candidates) == 1:
+                    resolved_merge_id = candidates[0]
+            valid_targets = [
+                source_column_id
+                for source_column_id in decision_merge.target_source_column_ids
+                if source_column_id in valid_source_column_ids
+            ]
+            if resolved_merge_id is None or (
+                decision_merge.action == "PROPAGATE" and not valid_targets
+            ):
+                changed = True
                 continue
-            try:
-                coordinate = range_boundaries(decision_merge.merge_id)
-            except ValueError:
-                normalized_merges.append(decision_merge)
-                continue
-            candidates = merge_ids_by_range.get(coordinate, [])
-            if len(candidates) != 1:
-                normalized_merges.append(decision_merge)
-                continue
-            changed = True
-            normalized_merges.append(decision_merge.model_copy(update={"merge_id": candidates[0]}))
+            changed = changed or (
+                resolved_merge_id != decision_merge.merge_id
+                or valid_targets != decision_merge.target_source_column_ids
+            )
+            normalized_merges.append(
+                decision_merge.model_copy(
+                    update={
+                        "merge_id": resolved_merge_id,
+                        "target_source_column_ids": valid_targets,
+                    }
+                )
+            )
         normalized_layouts.append(layout.model_copy(update={"merge_decisions": normalized_merges}))
     return result.model_copy(update={"layout_decisions": normalized_layouts}), changed
 
@@ -944,8 +1240,7 @@ def build_diff_request(
                         catalog_entry = catalog_by_code.get(code)
                         if catalog_entry is None:
                             continue
-                        field_candidates.append(
-                            SemanticCandidateSummary(
+                        semantic_candidate = SemanticCandidateSummary(
                                 code=code,
                                 version=int(raw_candidate.get("semantic_field_version") or 1),
                                 name=catalog_entry.name,
@@ -966,7 +1261,23 @@ def build_diff_request(
                                     str(reason) for reason in raw_candidate.get("reasons", [])
                                 ],
                             )
-                            )
+                        provisional_header = HeaderEvidenceSummary(
+                            header_candidate_id=candidate.id,
+                            region_candidate_id=candidate.region_id,
+                            source_column_id=column.source_column_id,
+                            header_path=column.header_path,
+                            evidence_cell_ids=column.evidence_cell_ids,
+                            observed_data_type=(
+                                field_match.observed_data_type
+                                if field_match is not None
+                                else None
+                            ),
+                        )
+                        if _candidate_is_compatible(
+                            provisional_header,
+                            semantic_candidate,
+                        ):
+                            field_candidates.append(semantic_candidate)
                 context = dict(field_match.context if field_match is not None else {})
                 leaf_label = str(column.header_path[-1]).strip() if column.header_path else ""
                 if not context.get("role") and re.fullmatch(r"\d{5}", leaf_label):
@@ -1228,6 +1539,14 @@ def publish_unambiguous_new_fields(
             unit_dimension=decision.unit,
             aliases=[name],
             validators=[],
+            source=AUTO_GOVERNANCE_SOURCE,
+            source_metadata=source_metadata(
+                source=AUTO_GOVERNANCE_SOURCE,
+                metadata={
+                    "source_column_id": decision.source_column_id,
+                    "recognition_confidence": decision.confidence,
+                },
+            ),
             status=TemplateStatus.PUBLISHED,
         )
         version.variants.append(
@@ -1235,7 +1554,7 @@ def publish_unambiguous_new_fields(
                 {
                     "kind": "header_path",
                     "header_path": header_path,
-                    "source": "hermes_verified",
+                    "source": AUTO_GOVERNANCE_SOURCE,
                     "confidence_basis_points": int(decision.confidence * 10_000),
                     "evidence": {
                         "source_column_id": decision.source_column_id,
@@ -1263,6 +1582,8 @@ def publish_unambiguous_new_fields(
 def validate_result(
     request: TemplateDiffRequest,
     result: TemplateDiffResult,
+    *,
+    allow_missing_template_suggestion: bool = False,
 ) -> None:
     column_ids = {header.source_column_id for header in request.headers}
     evidence_ids = _request_evidence_ids(request)
@@ -1280,6 +1601,7 @@ def validate_result(
         header.source_column_id: {candidate.code for candidate in header.semantic_candidates}
         for header in request.headers
     }
+    headers_by_column = {header.source_column_id: header for header in request.headers}
 
     decisions = result.field_decisions
     zero_record_structure = bool(result.layout_decisions) and not any(
@@ -1289,8 +1611,9 @@ def validate_result(
         request.match_type == "none"
         and result.template_suggestion is None
         and not zero_record_structure
+        and not allow_missing_template_suggestion
     ):
-        raise RecognitionValidationError("template suggestion is required when no template matches")
+        raise RecognitionValidationError(_TEMPLATE_SUGGESTION_REQUIRED_ERROR)
     if result.template_suggestion is not None:
         unknown = set(result.template_suggestion.evidence_ids) - evidence_ids
         if unknown:
@@ -1344,6 +1667,16 @@ def validate_result(
                 raise RecognitionValidationError(
                     "reused semantic field was not supplied as a field candidate"
                 )
+            header = headers_by_column[decision.source_column_id]
+            selected_candidate = next(
+                candidate
+                for candidate in header.semantic_candidates
+                if candidate.code == decision.semantic_field_code
+            )
+            if not _candidate_is_compatible(header, selected_candidate):
+                raise RecognitionValidationError(
+                    "reused semantic field is incompatible with the source header"
+                )
         if decision.action == "ROLE_VARIANT":
             if decision.semantic_field_code not in catalog_codes | proposed_codes:
                 raise RecognitionValidationError(
@@ -1360,6 +1693,17 @@ def validate_result(
                 raise RecognitionValidationError(
                     "role variant field was not supplied as a field candidate"
                 )
+            if decision.semantic_field_code in catalog_codes:
+                header = headers_by_column[decision.source_column_id]
+                selected_candidate = next(
+                    candidate
+                    for candidate in header.semantic_candidates
+                    if candidate.code == decision.semantic_field_code
+                )
+                if not _candidate_is_compatible(header, selected_candidate):
+                    raise RecognitionValidationError(
+                        "role variant field is incompatible with the source header"
+                    )
         if decision.action == "PROPOSE_NEW_FIELD" and decision.proposed_field_code in catalog_codes:
             raise RecognitionValidationError(
                 "proposed semantic field already exists in the published catalog"
@@ -1416,12 +1760,21 @@ def recognition_cache_key(
     request: TemplateDiffRequest,
     *,
     hermes_version: str,
+    provider: str,
+    model: str,
+    reasoning_model: str | None,
 ) -> str:
     payload = {
         "request": request.model_dump(mode="json"),
         "hermes_version": hermes_version,
+        "provider": provider,
+        "model": model,
+        "reasoning_model": reasoning_model,
         "prompt_version": PROMPT_VERSION,
         "schema_version": SCHEMA_VERSION,
+        "cache_compatibility_version": CACHE_COMPATIBILITY_VERSION,
+        "normalization_policy_version": NORMALIZATION_POLICY_VERSION,
+        "validation_policy_version": VALIDATION_POLICY_VERSION,
     }
     canonical = json.dumps(
         payload,
@@ -1430,6 +1783,268 @@ def recognition_cache_key(
         separators=(",", ":"),
     )
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _cache_metadata_matches(
+    cached: HermesRecognitionCache,
+    *,
+    schema_version: str,
+    request: TemplateDiffRequest,
+    runtime_version: str,
+    provider: str,
+    compatible_models: set[str],
+) -> bool:
+    return (
+        cached.hermes_version == runtime_version
+        and cached.provider == provider
+        and cached.model in compatible_models
+        and cached.prompt_version == PROMPT_VERSION
+        and cached.schema_version == schema_version
+        and cached.request_payload == request.model_dump(mode="json")
+    )
+
+
+def _log_incompatible_cache(
+    cached: HermesRecognitionCache,
+    *,
+    cache_stage: str,
+    reason: str,
+) -> None:
+    logger.warning(
+        "Hermes cache entry ignored by compatibility gate",
+        extra={
+            "cache_key_prefix": cached.cache_key[:12],
+            "cache_stage": cache_stage,
+            "cached_prompt_version": cached.prompt_version,
+            "cached_schema_version": cached.schema_version,
+            "reason": reason,
+        },
+    )
+
+
+def _replace_internal_cache(
+    database: Session,
+    *,
+    cache_key: str,
+    runtime_version: str,
+    provider: str,
+    model: str,
+    prompt_version: str,
+    schema_version: str,
+    request_payload: dict[str, Any],
+    response_payload: dict[str, Any],
+) -> None:
+    cached = database.get(HermesRecognitionCache, cache_key)
+    if cached is None:
+        database.add(
+            HermesRecognitionCache(
+                cache_key=cache_key,
+                hermes_version=runtime_version,
+                prompt_version=prompt_version,
+                schema_version=schema_version,
+                provider=provider,
+                model=model,
+                request_payload=request_payload,
+                response_payload=response_payload,
+            )
+        )
+        return
+    cached.hermes_version = runtime_version
+    cached.prompt_version = prompt_version
+    cached.schema_version = schema_version
+    cached.provider = provider
+    cached.model = model
+    cached.request_payload = request_payload
+    cached.response_payload = response_payload
+
+
+def _recovery_cache_key(
+    cache_key: str,
+    cached: HermesRecognitionCache,
+) -> str:
+    incompatible_fingerprint = hashlib.sha256(
+        json.dumps(
+            {
+                "prompt_version": cached.prompt_version,
+                "schema_version": cached.schema_version,
+                "response_payload": cached.response_payload,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    return hashlib.sha256(
+        f"{cache_key}:compatible-recompute:{incompatible_fingerprint}".encode()
+    ).hexdigest()
+
+
+def structure_checkpoint_cache_key(recognition_key: str) -> str:
+    return hashlib.sha256(
+        f"{recognition_key}:structure:{STRUCTURE_CHECKPOINT_SCHEMA_VERSION}".encode()
+    ).hexdigest()
+
+
+def load_structure_checkpoint(
+    database: Session,
+    *,
+    cache_key: str,
+    profile: WorkbookProfile,
+    request: TemplateDiffRequest,
+    runtime_version: str,
+    provider: str,
+    compatible_models: set[str],
+) -> StructureRecognitionCheckpoint | None:
+    cached = database.get(HermesRecognitionCache, structure_checkpoint_cache_key(cache_key))
+    if cached is None:
+        return None
+    if not _cache_metadata_matches(
+        cached,
+        schema_version=STRUCTURE_CHECKPOINT_SCHEMA_VERSION,
+        request=request,
+        runtime_version=runtime_version,
+        provider=provider,
+        compatible_models=compatible_models,
+    ):
+        _log_incompatible_cache(cached, cache_stage="structure", reason="metadata")
+        return None
+    try:
+        checkpoint = StructureRecognitionCheckpoint.model_validate(cached.response_payload)
+        validate_structure_decision(
+            profile,
+            checkpoint.enriched_request,
+            checkpoint.structure_decision,
+        )
+    except (TypeError, ValueError) as exc:
+        _log_incompatible_cache(
+            cached,
+            cache_stage="structure",
+            reason=type(exc).__name__,
+        )
+        return None
+    return checkpoint
+
+
+def store_structure_checkpoint(
+    database: Session,
+    *,
+    cache_key: str,
+    runtime_version: str,
+    provider: str,
+    model: str,
+    original_request: TemplateDiffRequest,
+    checkpoint: StructureRecognitionCheckpoint,
+) -> None:
+    checkpoint_key = structure_checkpoint_cache_key(cache_key)
+    _replace_internal_cache(
+        database,
+        cache_key=checkpoint_key,
+        runtime_version=runtime_version,
+        prompt_version=PROMPT_VERSION,
+        schema_version=STRUCTURE_CHECKPOINT_SCHEMA_VERSION,
+        provider=provider,
+        model=model,
+        request_payload=original_request.model_dump(mode="json"),
+        response_payload=checkpoint.model_dump(mode="json"),
+    )
+    # The structure decision is already deterministically validated. Persist it
+    # independently so a semantic timeout, worker restart, or lost lease resumes
+    # after structure recognition instead of paying for and varying that stage again.
+    database.commit()
+
+
+def semantic_chunk_checkpoint_cache_key(
+    recognition_key: str,
+    *,
+    index: int,
+    request: TemplateDiffRequest,
+) -> str:
+    chunk_payload = json.dumps(
+        request.model_dump(mode="json"),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    chunk_hash = hashlib.sha256(chunk_payload.encode()).hexdigest()
+    return hashlib.sha256(
+        f"{recognition_key}:semantic:{index}:{chunk_hash}:"
+        f"{SEMANTIC_CHUNK_CHECKPOINT_SCHEMA_VERSION}".encode()
+    ).hexdigest()
+
+
+def load_semantic_chunk_checkpoint(
+    database: Session,
+    *,
+    cache_key: str,
+    index: int,
+    request: TemplateDiffRequest,
+    runtime_version: str,
+    provider: str,
+    compatible_models: set[str],
+) -> SemanticChunkCheckpoint | None:
+    checkpoint_key = semantic_chunk_checkpoint_cache_key(
+        cache_key,
+        index=index,
+        request=request,
+    )
+    cached = database.get(HermesRecognitionCache, checkpoint_key)
+    if cached is None:
+        return None
+    if not _cache_metadata_matches(
+        cached,
+        schema_version=SEMANTIC_CHUNK_CHECKPOINT_SCHEMA_VERSION,
+        request=request,
+        runtime_version=runtime_version,
+        provider=provider,
+        compatible_models=compatible_models,
+    ):
+        _log_incompatible_cache(cached, cache_stage="semantic_chunk", reason="metadata")
+        return None
+    try:
+        checkpoint = SemanticChunkCheckpoint.model_validate(cached.response_payload)
+        validate_result(
+            request,
+            checkpoint.result,
+            allow_missing_template_suggestion=True,
+        )
+    except (TypeError, ValueError) as exc:
+        _log_incompatible_cache(
+            cached,
+            cache_stage="semantic_chunk",
+            reason=type(exc).__name__,
+        )
+        return None
+    return checkpoint
+
+
+def store_semantic_chunk_checkpoint(
+    database: Session,
+    *,
+    cache_key: str,
+    index: int,
+    runtime_version: str,
+    provider: str,
+    model: str,
+    request: TemplateDiffRequest,
+    checkpoint: SemanticChunkCheckpoint,
+) -> None:
+    checkpoint_key = semantic_chunk_checkpoint_cache_key(
+        cache_key,
+        index=index,
+        request=request,
+    )
+    _replace_internal_cache(
+        database,
+        cache_key=checkpoint_key,
+        runtime_version=runtime_version,
+        prompt_version=PROMPT_VERSION,
+        schema_version=SEMANTIC_CHUNK_CHECKPOINT_SCHEMA_VERSION,
+        provider=provider,
+        model=model,
+        request_payload=request.model_dump(mode="json"),
+        response_payload=checkpoint.model_dump(mode="json"),
+    )
+    database.commit()
 
 
 def installed_hermes_version() -> str:
@@ -1474,9 +2089,37 @@ def normalize_field_catalog_references(
         header.source_column_id: {candidate.code for candidate in header.semantic_candidates}
         for header in request.headers
     }
+    headers_by_column = {header.source_column_id: header for header in request.headers}
     candidates: list[FieldDecision] = []
     changed = False
     for decision in result.field_decisions:
+        header = headers_by_column.get(decision.source_column_id)
+        selected_candidate = next(
+            (
+                candidate
+                for candidate in header.semantic_candidates
+                if candidate.code == decision.semantic_field_code
+            ),
+            None,
+        ) if header is not None else None
+        if (
+            decision.action in {"REUSE_FIELD", "ADD_ALIAS", "ROLE_VARIANT"}
+            and header is not None
+            and selected_candidate is not None
+            and not _candidate_is_compatible(header, selected_candidate)
+        ):
+            changed = True
+            candidates.append(
+                decision.model_copy(
+                    update={
+                        "action": "AMBIGUOUS",
+                        "semantic_field_code": None,
+                        "confidence": min(decision.confidence, 0.5),
+                        "requires_review": True,
+                    }
+                )
+            )
+            continue
         if (
             decision.action in {"REUSE_FIELD", "ADD_ALIAS", "ROLE_VARIANT"}
             and decision.semantic_field_code not in catalog_codes
@@ -1692,6 +2335,11 @@ def _chunk_recognition_request(
         for field_group in field_groups:
             supplied_headers = field_group
             supplied_column_ids = {header.source_column_id for header in supplied_headers}
+            supplied_candidate_codes = {
+                candidate.code
+                for header in supplied_headers
+                for candidate in header.semantic_candidates
+            }
             samples: list[SourceSampleRow] = []
             for sample in request.source_samples:
                 if sample.region_candidate_id != region.candidate_id:
@@ -1715,6 +2363,11 @@ def _chunk_recognition_request(
                         "merge_ids": [],
                         "source_samples": samples,
                         "range_evidence": [],
+                        "semantic_catalog": [
+                            field
+                            for field in request.semantic_catalog
+                            if field.code in supplied_candidate_codes
+                        ],
                     }
                 )
             )
@@ -1916,6 +2569,81 @@ def _stabilize_field_only_result(
     )
 
 
+def _load_compatible_result_payload(
+    cached: HermesRecognitionCache,
+    *,
+    request: TemplateDiffRequest,
+    cache_stage: str,
+    runtime_version: str,
+    provider: str,
+    compatible_models: set[str],
+) -> TemplateDiffResult | None:
+    if not _cache_metadata_matches(
+        cached,
+        schema_version=SCHEMA_VERSION,
+        request=request,
+        runtime_version=runtime_version,
+        provider=provider,
+        compatible_models=compatible_models,
+    ):
+        _log_incompatible_cache(cached, cache_stage=cache_stage, reason="metadata")
+        return None
+    try:
+        return TemplateDiffResult.model_validate(cached.response_payload)
+    except (TypeError, ValueError) as exc:
+        _log_incompatible_cache(
+            cached,
+            cache_stage=cache_stage,
+            reason=type(exc).__name__,
+        )
+        return None
+
+
+def _load_compatible_final_result(
+    cached: HermesRecognitionCache,
+    *,
+    request: TemplateDiffRequest,
+    field_only_reuse: bool,
+    cache_stage: str,
+    runtime_version: str,
+    provider: str,
+    compatible_models: set[str],
+) -> tuple[TemplateDiffResult, TemplateDiffRequest] | None:
+    result = _load_compatible_result_payload(
+        cached,
+        request=request,
+        cache_stage=cache_stage,
+        runtime_version=runtime_version,
+        provider=provider,
+        compatible_models=compatible_models,
+    )
+    if result is None:
+        return None
+    compatible_request = request
+    try:
+        if result.structure_decision is not None and not field_only_reuse:
+            compatible_request = apply_structure_decision(
+                compatible_request,
+                result.structure_decision,
+            )
+        result, _ = normalize_field_catalog_references(compatible_request, result)
+        result = _retain_requested_field_decisions(compatible_request, result)
+        result = _stabilize_field_only_result(compatible_request, result)
+        validate_result(
+            compatible_request,
+            result,
+            allow_missing_template_suggestion=True,
+        )
+    except (TypeError, ValueError) as exc:
+        _log_incompatible_cache(
+            cached,
+            cache_stage=cache_stage,
+            reason=type(exc).__name__,
+        )
+        return None
+    return result, compatible_request
+
+
 def _request_for_sheet(
     request: TemplateDiffRequest,
     sheet_id: str,
@@ -1990,12 +2718,12 @@ async def _recognize_sheet_structure(
                 enabled_toolsets=(),
                 repair_attempts=1,
                 timeout_seconds=90,
-                max_tokens=4096,
+                max_tokens=8192,
             ),
             task_id=f"sheet-structure-{item_id}-{task_suffix}",
         )
         performed_models.append(model)
-    except HermesUnavailableError:
+    except (HermesInvalidResponseError, HermesUnavailableError):
         result = await runtime.run_json(
             system_prompt=(
                 system_prompt + " The fast structure pass failed. Produce the complete bounded "
@@ -2009,12 +2737,13 @@ async def _recognize_sheet_structure(
                 enabled_toolsets=(),
                 repair_attempts=1,
                 timeout_seconds=120,
-                max_tokens=4096,
+                max_tokens=8192,
             ),
             task_id=f"sheet-structure-fallback-{item_id}-{task_suffix}",
         )
         performed_models.append(reasoning_model or model)
-    result, _ = normalize_structure_data_ranges(
+    result, omitted_regions = complete_omitted_structure_regions(request, result)
+    result, normalization_requires_governance = normalize_structure_data_ranges(
         request,
         result,
     )
@@ -2022,10 +2751,15 @@ async def _recognize_sheet_structure(
         request,
         result,
     )
-    result, _ = normalize_structure_merge_references(
+    result, _ = normalize_structure_header_boundaries(profile, result)
+    result, _ = normalize_structure_row_roles(profile, request, result)
+    result, merge_normalized = normalize_structure_merge_references(
         profile,
         request,
         result,
+    )
+    normalization_requires_governance = (
+        normalization_requires_governance or merge_normalized
     )
     try:
         validate_structure_decision(profile, request, result)
@@ -2048,68 +2782,107 @@ async def _recognize_sheet_structure(
                 enabled_toolsets=(),
                 repair_attempts=1,
                 timeout_seconds=120,
-                max_tokens=4096,
+                max_tokens=8192,
             ),
             task_id=f"sheet-structure-contract-repair-{item_id}-{task_suffix}",
         )
         performed_models.append(reasoning_model or model)
-        result, _ = normalize_structure_data_ranges(
+        result, repaired_omissions = complete_omitted_structure_regions(
             request,
             result,
+        )
+        omitted_regions = omitted_regions or repaired_omissions
+        result, repair_range_normalized = normalize_structure_data_ranges(
+            request,
+            result,
+        )
+        normalization_requires_governance = (
+            normalization_requires_governance or repair_range_normalized
         )
         result, _ = normalize_ignored_structure_ranges(
             request,
             result,
         )
-        result, _ = normalize_structure_merge_references(
+        result, _ = normalize_structure_header_boundaries(profile, result)
+        result, _ = normalize_structure_row_roles(profile, request, result)
+        result, repair_merge_normalized = normalize_structure_merge_references(
             profile,
             request,
             result,
         )
         validate_structure_decision(profile, request, result)
+        normalization_requires_governance = (
+            normalization_requires_governance or repair_merge_normalized
+        )
 
-    unresolved_range_request = False
+    unresolved_range_request = omitted_regions or normalization_requires_governance
     if result.evidence_requests:
         additions = fulfill_range_requests(profile, result.evidence_requests)
+        if len(additions) < len(result.evidence_requests):
+            unresolved_range_request = True
         enriched = request.model_copy(
             update={
                 "range_evidence": [*request.range_evidence, *additions],
             }
         )
-        result = await runtime.run_json(
-            system_prompt=(
-                system_prompt
-                + " The backend fulfilled your bounded range requests. Return the final "
-                "complete decision. Do not request further evidence."
-            ),
-            user_prompt=enriched.model_dump_json(),
-            output_model=WorkbookStructureDecision,
-            policy=HermesCallPolicy(
-                thinking_enabled=True,
-                reasoning_effort="high",
-                enabled_toolsets=(),
-                repair_attempts=1,
-                timeout_seconds=120,
-                max_tokens=4096,
-            ),
-            task_id=f"sheet-structure-review-{item_id}-{task_suffix}",
-        )
-        performed_models.append(reasoning_model or model)
-        result, _ = normalize_structure_data_ranges(
-            enriched,
-            result,
-        )
-        result, _ = normalize_ignored_structure_ranges(
-            enriched,
-            result,
-        )
-        result, _ = normalize_structure_merge_references(
-            profile,
-            enriched,
-            result,
-        )
-        validate_structure_decision(profile, enriched, result)
-        unresolved_range_request = bool(result.evidence_requests)
+        conservative_result = result
+        try:
+            result = await runtime.run_json(
+                system_prompt=(
+                    system_prompt
+                    + " The backend fulfilled your bounded range requests. Return the final "
+                    "complete decision. Do not request further evidence."
+                ),
+                user_prompt=enriched.model_dump_json(),
+                output_model=WorkbookStructureDecision,
+                policy=HermesCallPolicy(
+                    thinking_enabled=True,
+                    reasoning_effort="high",
+                    enabled_toolsets=(),
+                    repair_attempts=0,
+                    timeout_seconds=60,
+                    max_tokens=8192,
+                ),
+                task_id=f"sheet-structure-review-{item_id}-{task_suffix}",
+            )
+            performed_models.append(reasoning_model or model)
+            result, review_omissions = complete_omitted_structure_regions(
+                enriched,
+                result,
+            )
+            result, review_range_normalized = normalize_structure_data_ranges(
+                enriched,
+                result,
+            )
+            result, _ = normalize_ignored_structure_ranges(
+                enriched,
+                result,
+            )
+            result, _ = normalize_structure_header_boundaries(profile, result)
+            result, _ = normalize_structure_row_roles(profile, enriched, result)
+            result, review_merge_normalized = normalize_structure_merge_references(
+                profile,
+                enriched,
+                result,
+            )
+            validate_structure_decision(profile, enriched, result)
+        except (
+            HermesInvalidResponseError,
+            HermesUnavailableError,
+            RecognitionValidationError,
+        ):
+            result = conservative_result
+            review_omissions = False
+            review_range_normalized = False
+            unresolved_range_request = True
+        else:
+            unresolved_range_request = (
+                unresolved_range_request
+                or review_range_normalized
+                or review_merge_normalized
+                or review_omissions
+                or bool(result.evidence_requests)
+            )
         request = enriched
     return (
         result,
@@ -2193,17 +2966,89 @@ async def recognize_differences(
         request.match_type == MatchType.EXACT
         and bool(request.unresolved_source_column_ids)
     )
-    cache_key = recognition_cache_key(request, hermes_version=runtime_version)
-    cached = database.get(HermesRecognitionCache, cache_key)
+    cache_key = recognition_cache_key(
+        request,
+        hermes_version=runtime_version,
+        provider=provider,
+        model=model,
+        reasoning_model=reasoning_model,
+    )
+    cached: HermesRecognitionCache | None = None
+    cached_result: TemplateDiffResult | None = None
+    cached_request: TemplateDiffRequest | None = None
+    for recovery_attempt in range(32):
+        candidate = database.get(HermesRecognitionCache, cache_key)
+        if candidate is None:
+            break
+        compatible = _load_compatible_final_result(
+            candidate,
+            request=original_request,
+            field_only_reuse=field_only_reuse,
+            cache_stage="final",
+            runtime_version=runtime_version,
+            provider=provider,
+            compatible_models={model, reasoning_model or model},
+        )
+        if compatible is not None:
+            cached = candidate
+            cached_result, cached_request = compatible
+            break
+        cache_key = hashlib.sha256(
+            f"{_recovery_cache_key(cache_key, candidate)}:{recovery_attempt}".encode()
+        ).hexdigest()
+    else:
+        # A deliberately bounded escape hatch protects the worker even if a damaged
+        # database contains a long chain of incompatible recovery entries.
+        cache_key = hashlib.sha256(
+            f"{cache_key}:fresh:{uuid.uuid4().hex}".encode()
+        ).hexdigest()
     call_performed = cached is None
     performed_models: list[str] = []
     if cached is None:
         fast_cache_key = hashlib.sha256(f"{cache_key}:fast".encode()).hexdigest()
         fast_cached = database.get(HermesRecognitionCache, fast_cache_key)
+        fast_compatible = (
+            _load_compatible_final_result(
+                fast_cached,
+                request=original_request,
+                field_only_reuse=field_only_reuse,
+                cache_stage="fast",
+                runtime_version=runtime_version,
+                provider=provider,
+                compatible_models={model},
+            )
+            if fast_cached is not None
+            else None
+        )
+        fast_cached_result = (
+            fast_compatible[0] if fast_compatible is not None else None
+        )
+        if fast_compatible is None:
+            fast_cached = None
         structure_decision: WorkbookStructureDecision | None = None
         structure_requires_governance = False
+        contract_repair_invalid_response = False
+        review_invalid_response = False
+        structure_checkpoint = (
+            load_structure_checkpoint(
+                database,
+                cache_key=cache_key,
+                profile=profile,
+                request=original_request,
+                runtime_version=runtime_version,
+                provider=provider,
+                compatible_models={model, reasoning_model or model},
+            )
+            if profile is not None and not field_only_reuse
+            else None
+        )
+        if structure_checkpoint is not None:
+            structure_decision = structure_checkpoint.structure_decision
+            request = structure_checkpoint.enriched_request
+            structure_requires_governance = structure_checkpoint.requires_governance
+            request = apply_structure_decision(request, structure_decision)
         if fast_cached is None:
-            if profile is not None and not field_only_reuse:
+            if profile is not None and not field_only_reuse and structure_checkpoint is None:
                 (
                     structure_decision,
                     request,
@@ -2218,12 +3063,43 @@ async def recognize_differences(
                     reasoning_model=reasoning_model,
                 )
                 performed_models.extend(structure_models)
+                store_structure_checkpoint(
+                    database,
+                    cache_key=cache_key,
+                    runtime_version=runtime_version,
+                    provider=provider,
+                    model=structure_models[-1] if structure_models else model,
+                    original_request=original_request,
+                    checkpoint=StructureRecognitionCheckpoint(
+                        structure_decision=structure_decision,
+                        enriched_request=request,
+                        requires_governance=structure_requires_governance,
+                        performed_models=structure_models,
+                    ),
+                )
                 request = apply_structure_decision(request, structure_decision)
             request_chunks = _chunk_recognition_request(request)
             chunk_results: list[TemplateDiffResult] = []
             for index, request_chunk in enumerate(request_chunks):
-                compact_result = await runtime.run_json(
-                    system_prompt=(
+                chunk_checkpoint = load_semantic_chunk_checkpoint(
+                    database,
+                    cache_key=cache_key,
+                    index=index,
+                    request=request_chunk,
+                    runtime_version=runtime_version,
+                    provider=provider,
+                    compatible_models={model, reasoning_model or model},
+                )
+                if chunk_checkpoint is not None:
+                    contract_repair_invalid_response = (
+                        contract_repair_invalid_response
+                        or chunk_checkpoint.contract_repair_invalid_response
+                    )
+                    chunk_results.append(chunk_checkpoint.result)
+                    continue
+                chunk_model_offset = len(performed_models)
+                chunk_contract_repair_invalid_response = False
+                semantic_system_prompt = (
                         "You make only the minimal semantic judgment for the supplied "
                         "changed structured-document fields. Never invent coordinates, "
                         "fields, or source values. The backend, not you, attaches evidence, "
@@ -2256,18 +3132,42 @@ async def recognize_differences(
                         "template_code, Chinese template_name, domain, and record_type "
                         "in template_suggestion. Do not return evidence IDs, merge "
                         "decisions, governance fields, candidates, or explanations."
-                    ),
-                    user_prompt=request_chunk.model_dump_json(),
-                    output_model=TemplateDiffChunkResult,
-                    policy=HermesCallPolicy(
-                        thinking_enabled=False,
-                        enabled_toolsets=(),
-                        repair_attempts=1,
-                        timeout_seconds=120,
-                        max_tokens=4096,
-                    ),
-                    task_id=f"template-diff-{item_id}-part-{index + 1}",
                 )
+                try:
+                    compact_result = await runtime.run_json(
+                        system_prompt=semantic_system_prompt,
+                        user_prompt=request_chunk.model_dump_json(),
+                        output_model=TemplateDiffChunkResult,
+                        policy=HermesCallPolicy(
+                            thinking_enabled=False,
+                            enabled_toolsets=(),
+                            repair_attempts=1,
+                            timeout_seconds=120,
+                            max_tokens=4096,
+                        ),
+                        task_id=f"template-diff-{item_id}-part-{index + 1}",
+                    )
+                    performed_models.append(model)
+                except (HermesInvalidResponseError, HermesUnavailableError):
+                    compact_result = await runtime.run_json(
+                        system_prompt=(
+                            semantic_system_prompt
+                            + " The bounded fast pass failed. Return the complete compact "
+                            "decision directly and keep every string concise."
+                        ),
+                        user_prompt=request_chunk.model_dump_json(),
+                        output_model=TemplateDiffChunkResult,
+                        policy=HermesCallPolicy(
+                            thinking_enabled=True,
+                            reasoning_effort="high",
+                            enabled_toolsets=(),
+                            repair_attempts=1,
+                            timeout_seconds=180,
+                            max_tokens=4096,
+                        ),
+                        task_id=f"template-diff-fallback-{item_id}-part-{index + 1}",
+                    )
+                    performed_models.append(reasoning_model or model)
                 chunk_result = _expand_chunk_result(request_chunk, compact_result)
                 chunk_result, _ = normalize_field_catalog_references(
                     request_chunk,
@@ -2286,55 +3186,106 @@ async def recognize_differences(
                 try:
                     validate_result(request_chunk, chunk_result)
                 except RecognitionValidationError as exc:
+                    previous_chunk_result = chunk_result
+                    validation_error, repair_target = _field_contract_repair_details(exc)
                     repair_payload = request_chunk.model_dump(mode="json")
                     repair_payload["previous_result"] = compact_result.model_dump(mode="json")
                     repair_payload["deterministic_validation_error"] = str(exc)
-                    compact_result = await runtime.run_json(
-                        system_prompt=(
-                            "Repair one semantic field chunk rejected by the backend. "
-                            "Return exactly one decision for every supplied "
-                            "unresolved_source_column_id and use only supplied IDs and "
-                            "semantic candidate codes. Correct only the reported contract "
-                            "conflict. Do not invent coordinates, fields, values, evidence "
-                            "IDs, or explanations."
-                        ),
-                        user_prompt=json.dumps(
-                            repair_payload,
-                            ensure_ascii=False,
-                        ),
-                        output_model=TemplateDiffChunkResult,
-                        policy=HermesCallPolicy(
-                            thinking_enabled=True,
-                            reasoning_effort="high",
-                            enabled_toolsets=(),
-                            repair_attempts=1,
-                            timeout_seconds=120,
-                            max_tokens=4096,
-                        ),
-                        task_id=(f"template-diff-contract-repair-{item_id}-part-{index + 1}"),
-                    )
-                    chunk_result = _expand_chunk_result(
-                        request_chunk,
-                        compact_result,
-                    )
-                    chunk_result, _ = normalize_field_catalog_references(
-                        request_chunk,
-                        chunk_result,
-                    )
-                    chunk_result = _retain_requested_field_decisions(
-                        request_chunk,
-                        chunk_result,
-                    )
-                    chunk_result = _stabilize_field_only_result(request_chunk, chunk_result)
-                    chunk_result = _attach_structure_layouts(
-                        request_chunk,
-                        chunk_result,
-                        structure_decision,
-                    )
-                    validate_result(request_chunk, chunk_result)
+                    repair_payload["validation_error"] = validation_error
+                    repair_payload["repair_target"] = repair_target
+                    repair_payload["constraints"] = {
+                        "preserve_valid_field_decisions": True,
+                        "preserve_valid_layout_decisions": True,
+                        "use_only_supplied_source_ids": True,
+                        "use_only_supplied_semantic_candidate_codes_for_reuse": True,
+                        "do_not_invent_source_values": True,
+                        "return_json_only": True,
+                    }
+                    try:
+                        compact_result = await runtime.run_json(
+                            system_prompt=(
+                                "Repair one semantic field chunk rejected by the backend. "
+                                "Use validation_error and repair_target as the exact repair "
+                                "goal. Preserve already valid decisions and change only the "
+                                "rejected contract part. Return exactly one decision for "
+                                "every supplied unresolved_source_column_id and use only "
+                                "supplied IDs and semantic candidate codes. Do not invent "
+                                "coordinates, fields, values, evidence IDs, or explanations."
+                            ),
+                            user_prompt=json.dumps(
+                                repair_payload,
+                                ensure_ascii=False,
+                            ),
+                            output_model=TemplateDiffChunkResult,
+                            policy=HermesCallPolicy(
+                                thinking_enabled=True,
+                                reasoning_effort="high",
+                                enabled_toolsets=(),
+                                repair_attempts=1,
+                                timeout_seconds=120,
+                                max_tokens=4096,
+                            ),
+                            task_id=(
+                                f"template-diff-contract-repair-{item_id}-part-{index + 1}"
+                            ),
+                        )
+                    except (HermesInvalidResponseError, HermesUnavailableError):
+                        if not _is_missing_template_suggestion_error(exc):
+                            raise
+                        contract_repair_invalid_response = True
+                        chunk_contract_repair_invalid_response = True
+                        chunk_result = previous_chunk_result
+                    else:
+                        chunk_result = _expand_chunk_result(
+                            request_chunk,
+                            compact_result,
+                        )
+                        chunk_result, _ = normalize_field_catalog_references(
+                            request_chunk,
+                            chunk_result,
+                        )
+                        chunk_result = _retain_requested_field_decisions(
+                            request_chunk,
+                            chunk_result,
+                        )
+                        chunk_result = _stabilize_field_only_result(
+                            request_chunk,
+                            chunk_result,
+                        )
+                        chunk_result = _attach_structure_layouts(
+                            request_chunk,
+                            chunk_result,
+                            structure_decision,
+                        )
+                    try:
+                        validate_result(request_chunk, chunk_result)
+                    except RecognitionValidationError as repaired_exc:
+                        if not _is_missing_template_suggestion_error(repaired_exc):
+                            raise
+                        validate_result(
+                            request_chunk,
+                            chunk_result,
+                            allow_missing_template_suggestion=True,
+                        )
                     performed_models.append(reasoning_model or model)
                 chunk_results.append(chunk_result)
-                performed_models.append(model)
+                chunk_models = performed_models[chunk_model_offset:]
+                store_semantic_chunk_checkpoint(
+                    database,
+                    cache_key=cache_key,
+                    index=index,
+                    runtime_version=runtime_version,
+                    provider=provider,
+                    model=chunk_models[-1] if chunk_models else model,
+                    request=request_chunk,
+                    checkpoint=SemanticChunkCheckpoint(
+                        result=chunk_result,
+                        contract_repair_invalid_response=(
+                            chunk_contract_repair_invalid_response
+                        ),
+                        performed_models=chunk_models,
+                    ),
+                )
             result = (
                 _merge_chunk_results(chunk_results, request)
                 if chunk_results
@@ -2347,6 +3298,10 @@ async def recognize_differences(
                     structure_decision=structure_decision,
                 )
             )
+            # Semantic chunks intentionally receive only their candidate subset to
+            # keep prompts bounded. Reconcile the merged result against the complete
+            # published catalog before it can reach validation or publication.
+            result, _ = normalize_field_catalog_references(request, result)
             result = _stabilize_field_only_result(request, result)
             retained_region_ids = {region.candidate_id for region in request.regions}
             result = result.model_copy(
@@ -2365,10 +3320,15 @@ async def recognize_differences(
                     ),
                 }
             )
-            validate_result(request, result)
-            fast_cached = HermesRecognitionCache(
+            validate_result(
+                request,
+                result,
+                allow_missing_template_suggestion=True,
+            )
+            _replace_internal_cache(
+                database,
                 cache_key=fast_cache_key,
-                hermes_version=runtime_version,
+                runtime_version=runtime_version,
                 prompt_version=PROMPT_VERSION,
                 schema_version=SCHEMA_VERSION,
                 provider=provider,
@@ -2376,16 +3336,26 @@ async def recognize_differences(
                 request_payload=original_request.model_dump(mode="json"),
                 response_payload=result.model_dump(mode="json"),
             )
-            database.add(fast_cached)
             database.commit()
         else:
-            result = TemplateDiffResult.model_validate(fast_cached.response_payload)
+            assert fast_cached_result is not None
+            result = fast_cached_result
             structure_decision = result.structure_decision
             result = _stabilize_field_only_result(request, result)
-            if structure_decision is not None and not field_only_reuse:
+            if (
+                structure_decision is not None
+                and not field_only_reuse
+                and structure_checkpoint is None
+            ):
                 request = apply_structure_decision(request, structure_decision)
         chunked = len(_chunk_recognition_request(request)) > 1
         first_reasons, _ = governance_reasons(result)
+        if (
+            request.match_type == MatchType.NONE
+            and result.template_suggestion is None
+            and _TEMPLATE_SUGGESTION_MISSING_REASON not in first_reasons
+        ):
+            first_reasons.append(_TEMPLATE_SUGGESTION_MISSING_REASON)
         if (
             not field_only_reuse
             and any(decision.materialize for decision in result.layout_decisions)
@@ -2400,12 +3370,21 @@ async def recognize_differences(
             first_reasons.append("HERMES_STRUCTURE_REVIEW_REQUIRED")
         fast_validation_error: str | None = None
         try:
-            validate_result(request, result)
+            validate_result(
+                request,
+                result,
+                allow_missing_template_suggestion=True,
+            )
         except RecognitionValidationError as exc:
             fast_validation_error = str(exc)
             first_reasons.append("HERMES_CONTRACT_CONFLICT")
         call_count = 1
-        if first_reasons and not chunked:
+        review_reasons = [
+            reason
+            for reason in first_reasons
+            if reason != _TEMPLATE_SUGGESTION_MISSING_REASON
+        ]
+        if review_reasons and not chunked:
             reconsideration_payload = request.model_dump(mode="json")
             reconsideration_payload["previous_result"] = result.model_dump(mode="json")
             reconsideration_payload["deterministic_validation_error"] = fast_validation_error
@@ -2414,49 +3393,83 @@ async def recognize_differences(
                 "decisions using the same headers and source_samples. Return the complete "
                 "corrected result."
             )
-            result = await runtime.run_json(
-                system_prompt=(
-                    "You are the second-pass reviewer for a structured spreadsheet plan. "
-                    "Use the supplied headers, redacted representative source samples, and "
-                    "the previous result to resolve conflicts. Do not invent evidence IDs, "
-                    "coordinates, fields, or values. Return the complete result, covering "
-                    "every supplied changed column and region exactly once."
-                ),
-                user_prompt=json.dumps(reconsideration_payload, ensure_ascii=False),
-                output_model=TemplateDiffResult,
-                policy=HermesCallPolicy(
-                    thinking_enabled=True,
-                    reasoning_effort="high",
-                    enabled_toolsets=(),
-                    repair_attempts=1,
-                    timeout_seconds=300,
-                ),
-                task_id=f"template-diff-review-{item_id}",
-            )
-            result, _ = normalize_field_catalog_references(request, result)
-            result = _retain_requested_field_decisions(request, result)
-            result = _stabilize_field_only_result(request, result)
-            validate_result(request, result)
-            result = result.model_copy(
-                update={
-                    "structure_decision": (
-                        structure_decision if not field_only_reuse else None
+            previous_result = result
+            try:
+                reviewed_result = await runtime.run_json(
+                    system_prompt=(
+                        "You are the second-pass reviewer for a structured spreadsheet "
+                        "plan. Use the supplied headers, redacted representative source "
+                        "samples, and the previous result to resolve conflicts. Do not "
+                        "invent evidence IDs, coordinates, fields, or values. Return the "
+                        "complete result, covering every supplied changed column and region "
+                        "exactly once."
                     ),
-                    "layout_decisions": (
-                        [
-                            decision
-                            for decision in structure_decision.layout_decisions
-                            if decision.region_candidate_id
-                            in {region.candidate_id for region in request.regions}
-                        ]
-                        if structure_decision is not None and not field_only_reuse
-                        else result.layout_decisions
+                    user_prompt=json.dumps(reconsideration_payload, ensure_ascii=False),
+                    output_model=TemplateDiffResult,
+                    policy=HermesCallPolicy(
+                        thinking_enabled=True,
+                        reasoning_effort="high",
+                        enabled_toolsets=(),
+                        repair_attempts=1,
+                        timeout_seconds=300,
                     ),
-                }
-            )
+                    task_id=f"template-diff-review-{item_id}",
+                )
+                reviewed_result, _ = normalize_field_catalog_references(
+                    request,
+                    reviewed_result,
+                )
+                reviewed_result = _retain_requested_field_decisions(
+                    request,
+                    reviewed_result,
+                )
+                reviewed_result = _stabilize_field_only_result(
+                    request,
+                    reviewed_result,
+                )
+                validate_result(
+                    request,
+                    reviewed_result,
+                    allow_missing_template_suggestion=True,
+                )
+            except (
+                HermesInvalidResponseError,
+                HermesUnavailableError,
+                RecognitionValidationError,
+            ):
+                review_invalid_response = True
+                result = previous_result
+            else:
+                result = reviewed_result.model_copy(
+                    update={
+                        "structure_decision": (
+                            structure_decision if not field_only_reuse else None
+                        ),
+                        "layout_decisions": (
+                            [
+                                decision
+                                for decision in structure_decision.layout_decisions
+                                if decision.region_candidate_id
+                                in {region.candidate_id for region in request.regions}
+                            ]
+                            if structure_decision is not None and not field_only_reuse
+                            else reviewed_result.layout_decisions
+                        ),
+                    }
+                )
             call_count = 2
             performed_models.append(reasoning_model or model)
         final_reasons, minimum_confidence = governance_reasons(result)
+        if (
+            request.match_type == MatchType.NONE
+            and result.template_suggestion is None
+            and _TEMPLATE_SUGGESTION_MISSING_REASON not in final_reasons
+        ):
+            final_reasons.append(_TEMPLATE_SUGGESTION_MISSING_REASON)
+        if contract_repair_invalid_response:
+            final_reasons.append("HERMES_CONTRACT_REPAIR_INVALID_RESPONSE")
+        if review_invalid_response:
+            final_reasons.append("HERMES_REVIEW_INVALID_RESPONSE")
         if (
             not field_only_reuse
             and any(decision.materialize for decision in result.layout_decisions)
@@ -2491,13 +3504,10 @@ async def recognize_differences(
         database.add(cached)
         database.flush()
     else:
-        result = TemplateDiffResult.model_validate(cached.response_payload)
-        if result.structure_decision is not None and not field_only_reuse:
-            request = apply_structure_decision(request, result.structure_decision)
-        result, _ = normalize_field_catalog_references(request, result)
-        result = _retain_requested_field_decisions(request, result)
-        result = _stabilize_field_only_result(request, result)
-        validate_result(request, result)
+        assert cached_result is not None
+        assert cached_request is not None
+        result = cached_result
+        request = cached_request
 
     call_performed = bool(performed_models)
     input_field_count = len(request.new_headers) + len(request.missing_headers)
@@ -2871,6 +3881,14 @@ def accept_recognition_proposal(
                     layer=decision.layer,
                     data_type=decision.data_type,
                     unit_dimension=decision.unit,
+                    source=MANUAL_GOVERNANCE_SOURCE,
+                    source_metadata=source_metadata(
+                        source=MANUAL_GOVERNANCE_SOURCE,
+                        metadata={
+                            "proposal_id": str(proposal.id),
+                            "source_item_id": str(proposal.source_item_id),
+                        },
+                    ),
                 )
             )
             database.add(field)
@@ -2910,15 +3928,19 @@ def accept_recognition_proposal(
             status=TemplateStatus.USER_CONFIRMED,
             layout_fingerprint=match.layout_fingerprint,
             definition=definition.model_dump(mode="json"),
-            source="hermes",
-            source_metadata={
-                "proposal_id": str(proposal.id),
-                "confirmed_by": actor,
-                "source_item_id": str(proposal.source_item_id),
-                "approved_layout_plan": [
-                    decision.model_dump(mode="json") for decision in result.layout_decisions
-                ],
-            },
+            source=MANUAL_GOVERNANCE_SOURCE,
+            source_metadata=source_metadata(
+                source=MANUAL_GOVERNANCE_SOURCE,
+                metadata={
+                    "proposal_id": str(proposal.id),
+                    "confirmed_by": actor,
+                    "source_item_id": str(proposal.source_item_id),
+                    "approved_layout_plan": [
+                        decision.model_dump(mode="json")
+                        for decision in result.layout_decisions
+                    ],
+                },
+            ),
         )
     )
     proposal.status = ProposalStatus.ACCEPTED

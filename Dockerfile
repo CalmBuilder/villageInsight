@@ -2,13 +2,15 @@ FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
-RUN pip install --no-cache-dir uv
-COPY pyproject.toml README.md alembic.ini ./
+RUN pip install --no-cache-dir uv==0.11.6
+COPY pyproject.toml uv.lock README.md alembic.ini ./
+RUN uv sync --frozen --no-dev --no-install-project
 COPY alembic ./alembic
 COPY src ./src
-RUN uv pip install --system .
+RUN uv sync --frozen --no-dev
 
 RUN useradd --create-home --uid 10001 village-insight \
     && mkdir -p /data/uploads /data/import \

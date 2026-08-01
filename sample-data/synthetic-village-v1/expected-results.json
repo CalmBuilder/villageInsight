@@ -1,0 +1,1854 @@
+{
+  "contract_version": "synthetic-expected-results/v1",
+  "dataset_version": "synthetic-village-v1",
+  "results": [
+    {
+      "case_id": "demo-question-0001",
+      "expected_answer": "180人",
+      "expected_value": 180,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0002",
+      "expected_answer": "60户",
+      "expected_value": 60,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0003",
+      "expected_answer": "80人",
+      "expected_value": 80,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0004",
+      "expected_answer": "100人",
+      "expected_value": 100,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0005",
+      "expected_answer": "60人",
+      "expected_value": 60,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0006",
+      "expected_answer": "60人",
+      "expected_value": 60,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0007",
+      "expected_answer": "60人",
+      "expected_value": 60,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0008",
+      "expected_answer": "60人",
+      "expected_value": 60,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0009",
+      "expected_answer": "60人",
+      "expected_value": 60,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0010",
+      "expected_answer": "60人",
+      "expected_value": 60,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0011",
+      "expected_answer": "DEMO-HH-0001",
+      "expected_value": "DEMO-HH-0001",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0012",
+      "expected_answer": "户主",
+      "expected_value": "户主",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0013",
+      "expected_answer": "男",
+      "expected_value": "男",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0014",
+      "expected_answer": "普通演示户",
+      "expected_value": "普通演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0015",
+      "expected_answer": "DEMO-HH-0001",
+      "expected_value": "DEMO-HH-0001",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0016",
+      "expected_answer": "配偶",
+      "expected_value": "配偶",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0017",
+      "expected_answer": "女",
+      "expected_value": "女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0018",
+      "expected_answer": "普通演示户",
+      "expected_value": "普通演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0019",
+      "expected_answer": "DEMO-HH-0001",
+      "expected_value": "DEMO-HH-0001",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0020",
+      "expected_answer": "子女",
+      "expected_value": "子女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0021",
+      "expected_answer": "男",
+      "expected_value": "男",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0022",
+      "expected_answer": "普通演示户",
+      "expected_value": "普通演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0023",
+      "expected_answer": "DEMO-HH-0002",
+      "expected_value": "DEMO-HH-0002",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0024",
+      "expected_answer": "户主",
+      "expected_value": "户主",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0025",
+      "expected_answer": "女",
+      "expected_value": "女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0026",
+      "expected_answer": "低保演示户",
+      "expected_value": "低保演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0027",
+      "expected_answer": "DEMO-HH-0002",
+      "expected_value": "DEMO-HH-0002",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0028",
+      "expected_answer": "配偶",
+      "expected_value": "配偶",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0029",
+      "expected_answer": "男",
+      "expected_value": "男",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0030",
+      "expected_answer": "低保演示户",
+      "expected_value": "低保演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0031",
+      "expected_answer": "DEMO-HH-0002",
+      "expected_value": "DEMO-HH-0002",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0032",
+      "expected_answer": "子女",
+      "expected_value": "子女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0033",
+      "expected_answer": "男",
+      "expected_value": "男",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0034",
+      "expected_answer": "低保演示户",
+      "expected_value": "低保演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0035",
+      "expected_answer": "DEMO-HH-0003",
+      "expected_value": "DEMO-HH-0003",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0036",
+      "expected_answer": "户主",
+      "expected_value": "户主",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0037",
+      "expected_answer": "男",
+      "expected_value": "男",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0038",
+      "expected_answer": "监测演示户",
+      "expected_value": "监测演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0039",
+      "expected_answer": "DEMO-HH-0003",
+      "expected_value": "DEMO-HH-0003",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0040",
+      "expected_answer": "配偶",
+      "expected_value": "配偶",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0041",
+      "expected_answer": "女",
+      "expected_value": "女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0042",
+      "expected_answer": "监测演示户",
+      "expected_value": "监测演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0043",
+      "expected_answer": "DEMO-HH-0003",
+      "expected_value": "DEMO-HH-0003",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0044",
+      "expected_answer": "子女",
+      "expected_value": "子女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0045",
+      "expected_answer": "女",
+      "expected_value": "女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0046",
+      "expected_answer": "监测演示户",
+      "expected_value": "监测演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0047",
+      "expected_answer": "DEMO-HH-0004",
+      "expected_value": "DEMO-HH-0004",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0048",
+      "expected_answer": "户主",
+      "expected_value": "户主",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0049",
+      "expected_answer": "女",
+      "expected_value": "女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0050",
+      "expected_answer": "普通演示户",
+      "expected_value": "普通演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0051",
+      "expected_answer": "DEMO-HH-0004",
+      "expected_value": "DEMO-HH-0004",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0052",
+      "expected_answer": "配偶",
+      "expected_value": "配偶",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0053",
+      "expected_answer": "男",
+      "expected_value": "男",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0054",
+      "expected_answer": "普通演示户",
+      "expected_value": "普通演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0055",
+      "expected_answer": "DEMO-HH-0004",
+      "expected_value": "DEMO-HH-0004",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0056",
+      "expected_answer": "子女",
+      "expected_value": "子女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0057",
+      "expected_answer": "男",
+      "expected_value": "男",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0058",
+      "expected_answer": "普通演示户",
+      "expected_value": "普通演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0059",
+      "expected_answer": "DEMO-HH-0005",
+      "expected_value": "DEMO-HH-0005",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0060",
+      "expected_answer": "户主",
+      "expected_value": "户主",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0061",
+      "expected_answer": "男",
+      "expected_value": "男",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0062",
+      "expected_answer": "低保演示户",
+      "expected_value": "低保演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0063",
+      "expected_answer": "DEMO-HH-0005",
+      "expected_value": "DEMO-HH-0005",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0064",
+      "expected_answer": "配偶",
+      "expected_value": "配偶",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0065",
+      "expected_answer": "女",
+      "expected_value": "女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0066",
+      "expected_answer": "低保演示户",
+      "expected_value": "低保演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0067",
+      "expected_answer": "DEMO-HH-0005",
+      "expected_value": "DEMO-HH-0005",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0068",
+      "expected_answer": "子女",
+      "expected_value": "子女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0069",
+      "expected_answer": "男",
+      "expected_value": "男",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0070",
+      "expected_answer": "低保演示户",
+      "expected_value": "低保演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0071",
+      "expected_answer": "DEMO-HH-0006",
+      "expected_value": "DEMO-HH-0006",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0072",
+      "expected_answer": "户主",
+      "expected_value": "户主",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0073",
+      "expected_answer": "女",
+      "expected_value": "女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0074",
+      "expected_answer": "监测演示户",
+      "expected_value": "监测演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0075",
+      "expected_answer": "DEMO-HH-0006",
+      "expected_value": "DEMO-HH-0006",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0076",
+      "expected_answer": "配偶",
+      "expected_value": "配偶",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0077",
+      "expected_answer": "男",
+      "expected_value": "男",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0078",
+      "expected_answer": "监测演示户",
+      "expected_value": "监测演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0079",
+      "expected_answer": "DEMO-HH-0006",
+      "expected_value": "DEMO-HH-0006",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0080",
+      "expected_answer": "子女",
+      "expected_value": "子女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0081",
+      "expected_answer": "女",
+      "expected_value": "女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0082",
+      "expected_answer": "监测演示户",
+      "expected_value": "监测演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0083",
+      "expected_answer": "DEMO-HH-0007",
+      "expected_value": "DEMO-HH-0007",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0084",
+      "expected_answer": "户主",
+      "expected_value": "户主",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0085",
+      "expected_answer": "男",
+      "expected_value": "男",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0086",
+      "expected_answer": "普通演示户",
+      "expected_value": "普通演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0087",
+      "expected_answer": "DEMO-HH-0007",
+      "expected_value": "DEMO-HH-0007",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0088",
+      "expected_answer": "配偶",
+      "expected_value": "配偶",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0089",
+      "expected_answer": "女",
+      "expected_value": "女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0090",
+      "expected_answer": "普通演示户",
+      "expected_value": "普通演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0091",
+      "expected_answer": "DEMO-HH-0007",
+      "expected_value": "DEMO-HH-0007",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0092",
+      "expected_answer": "子女",
+      "expected_value": "子女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0093",
+      "expected_answer": "男",
+      "expected_value": "男",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0094",
+      "expected_answer": "普通演示户",
+      "expected_value": "普通演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0095",
+      "expected_answer": "DEMO-HH-0008",
+      "expected_value": "DEMO-HH-0008",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0096",
+      "expected_answer": "户主",
+      "expected_value": "户主",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0097",
+      "expected_answer": "女",
+      "expected_value": "女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0098",
+      "expected_answer": "低保演示户",
+      "expected_value": "低保演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0099",
+      "expected_answer": "DEMO-HH-0008",
+      "expected_value": "DEMO-HH-0008",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0100",
+      "expected_answer": "配偶",
+      "expected_value": "配偶",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0101",
+      "expected_answer": "男",
+      "expected_value": "男",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0102",
+      "expected_answer": "低保演示户",
+      "expected_value": "低保演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0103",
+      "expected_answer": "DEMO-HH-0008",
+      "expected_value": "DEMO-HH-0008",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0104",
+      "expected_answer": "子女",
+      "expected_value": "子女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0105",
+      "expected_answer": "男",
+      "expected_value": "男",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0106",
+      "expected_answer": "低保演示户",
+      "expected_value": "低保演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0107",
+      "expected_answer": "DEMO-HH-0009",
+      "expected_value": "DEMO-HH-0009",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0108",
+      "expected_answer": "户主",
+      "expected_value": "户主",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0109",
+      "expected_answer": "男",
+      "expected_value": "男",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0110",
+      "expected_answer": "监测演示户",
+      "expected_value": "监测演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0111",
+      "expected_answer": "DEMO-HH-0009",
+      "expected_value": "DEMO-HH-0009",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0112",
+      "expected_answer": "配偶",
+      "expected_value": "配偶",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0113",
+      "expected_answer": "女",
+      "expected_value": "女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0114",
+      "expected_answer": "监测演示户",
+      "expected_value": "监测演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0115",
+      "expected_answer": "DEMO-HH-0009",
+      "expected_value": "DEMO-HH-0009",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0116",
+      "expected_answer": "子女",
+      "expected_value": "子女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0117",
+      "expected_answer": "女",
+      "expected_value": "女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0118",
+      "expected_answer": "监测演示户",
+      "expected_value": "监测演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0119",
+      "expected_answer": "DEMO-HH-0010",
+      "expected_value": "DEMO-HH-0010",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0120",
+      "expected_answer": "户主",
+      "expected_value": "户主",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0121",
+      "expected_answer": "女",
+      "expected_value": "女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0122",
+      "expected_answer": "普通演示户",
+      "expected_value": "普通演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0123",
+      "expected_answer": "DEMO-HH-0010",
+      "expected_value": "DEMO-HH-0010",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0124",
+      "expected_answer": "配偶",
+      "expected_value": "配偶",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0125",
+      "expected_answer": "男",
+      "expected_value": "男",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0126",
+      "expected_answer": "普通演示户",
+      "expected_value": "普通演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0127",
+      "expected_answer": "DEMO-HH-0010",
+      "expected_value": "DEMO-HH-0010",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0128",
+      "expected_answer": "子女",
+      "expected_value": "子女",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0129",
+      "expected_answer": "男",
+      "expected_value": "男",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0130",
+      "expected_answer": "普通演示户",
+      "expected_value": "普通演示户",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0131",
+      "expected_answer": "3人",
+      "expected_value": 3,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0132",
+      "expected_answer": "3人",
+      "expected_value": 3,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0133",
+      "expected_answer": "3人",
+      "expected_value": 3,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0134",
+      "expected_answer": "3人",
+      "expected_value": 3,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0135",
+      "expected_answer": "3人",
+      "expected_value": 3,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0136",
+      "expected_answer": "3人",
+      "expected_value": 3,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0137",
+      "expected_answer": "3人",
+      "expected_value": 3,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0138",
+      "expected_answer": "3人",
+      "expected_value": 3,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0139",
+      "expected_answer": "3人",
+      "expected_value": 3,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0140",
+      "expected_answer": "3人",
+      "expected_value": 3,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0141",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0142",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0143",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0144",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0145",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0146",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0147",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0148",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0149",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0150",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0151",
+      "expected_answer": "120人",
+      "expected_value": 120,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0152",
+      "expected_answer": "53人",
+      "expected_value": 53,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0153",
+      "expected_answer": "67人",
+      "expected_value": 67,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0154",
+      "expected_answer": "24人",
+      "expected_value": 24,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0155",
+      "expected_answer": "24人",
+      "expected_value": 24,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0156",
+      "expected_answer": "24人",
+      "expected_value": 24,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0157",
+      "expected_answer": "24人",
+      "expected_value": 24,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0158",
+      "expected_answer": "24人",
+      "expected_value": 24,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0159",
+      "expected_answer": "40人",
+      "expected_value": 40,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0160",
+      "expected_answer": "40人",
+      "expected_value": 40,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0161",
+      "expected_answer": "40人",
+      "expected_value": 40,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0162",
+      "expected_answer": "32岁",
+      "expected_value": 32,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0163",
+      "expected_answer": "小学",
+      "expected_value": "小学",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0164",
+      "expected_answer": "演示一支部",
+      "expected_value": "演示一支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0165",
+      "expected_answer": "39岁",
+      "expected_value": 39,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0166",
+      "expected_answer": "初中",
+      "expected_value": "初中",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0167",
+      "expected_answer": "演示二支部",
+      "expected_value": "演示二支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0168",
+      "expected_answer": "46岁",
+      "expected_value": 46,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0169",
+      "expected_answer": "高中",
+      "expected_value": "高中",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0170",
+      "expected_answer": "演示三支部",
+      "expected_value": "演示三支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0171",
+      "expected_answer": "53岁",
+      "expected_value": 53,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0172",
+      "expected_answer": "大专",
+      "expected_value": "大专",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0173",
+      "expected_answer": "演示一支部",
+      "expected_value": "演示一支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0174",
+      "expected_answer": "60岁",
+      "expected_value": 60,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0175",
+      "expected_answer": "本科",
+      "expected_value": "本科",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0176",
+      "expected_answer": "演示二支部",
+      "expected_value": "演示二支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0177",
+      "expected_answer": "67岁",
+      "expected_value": 67,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0178",
+      "expected_answer": "小学",
+      "expected_value": "小学",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0179",
+      "expected_answer": "演示三支部",
+      "expected_value": "演示三支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0180",
+      "expected_answer": "28岁",
+      "expected_value": 28,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0181",
+      "expected_answer": "初中",
+      "expected_value": "初中",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0182",
+      "expected_answer": "演示一支部",
+      "expected_value": "演示一支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0183",
+      "expected_answer": "35岁",
+      "expected_value": 35,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0184",
+      "expected_answer": "高中",
+      "expected_value": "高中",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0185",
+      "expected_answer": "演示二支部",
+      "expected_value": "演示二支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0186",
+      "expected_answer": "42岁",
+      "expected_value": 42,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0187",
+      "expected_answer": "大专",
+      "expected_value": "大专",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0188",
+      "expected_answer": "演示三支部",
+      "expected_value": "演示三支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0189",
+      "expected_answer": "49岁",
+      "expected_value": 49,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0190",
+      "expected_answer": "本科",
+      "expected_value": "本科",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0191",
+      "expected_answer": "演示一支部",
+      "expected_value": "演示一支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0192",
+      "expected_answer": "56岁",
+      "expected_value": 56,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0193",
+      "expected_answer": "小学",
+      "expected_value": "小学",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0194",
+      "expected_answer": "演示二支部",
+      "expected_value": "演示二支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0195",
+      "expected_answer": "63岁",
+      "expected_value": 63,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0196",
+      "expected_answer": "初中",
+      "expected_value": "初中",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0197",
+      "expected_answer": "演示三支部",
+      "expected_value": "演示三支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0198",
+      "expected_answer": "70岁",
+      "expected_value": 70,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0199",
+      "expected_answer": "高中",
+      "expected_value": "高中",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0200",
+      "expected_answer": "演示一支部",
+      "expected_value": "演示一支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0201",
+      "expected_answer": "31岁",
+      "expected_value": 31,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0202",
+      "expected_answer": "大专",
+      "expected_value": "大专",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0203",
+      "expected_answer": "演示二支部",
+      "expected_value": "演示二支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0204",
+      "expected_answer": "38岁",
+      "expected_value": 38,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0205",
+      "expected_answer": "本科",
+      "expected_value": "本科",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0206",
+      "expected_answer": "演示三支部",
+      "expected_value": "演示三支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0207",
+      "expected_answer": "45岁",
+      "expected_value": 45,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0208",
+      "expected_answer": "小学",
+      "expected_value": "小学",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0209",
+      "expected_answer": "演示一支部",
+      "expected_value": "演示一支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0210",
+      "expected_answer": "52岁",
+      "expected_value": 52,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0211",
+      "expected_answer": "初中",
+      "expected_value": "初中",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0212",
+      "expected_answer": "演示二支部",
+      "expected_value": "演示二支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0213",
+      "expected_answer": "59岁",
+      "expected_value": 59,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0214",
+      "expected_answer": "高中",
+      "expected_value": "高中",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0215",
+      "expected_answer": "演示三支部",
+      "expected_value": "演示三支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0216",
+      "expected_answer": "66岁",
+      "expected_value": 66,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0217",
+      "expected_answer": "大专",
+      "expected_value": "大专",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0218",
+      "expected_answer": "演示一支部",
+      "expected_value": "演示一支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0219",
+      "expected_answer": "27岁",
+      "expected_value": 27,
+      "answer_type": "int",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0220",
+      "expected_answer": "本科",
+      "expected_value": "本科",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0221",
+      "expected_answer": "演示二支部",
+      "expected_value": "演示二支部",
+      "answer_type": "str",
+      "comparison": "exact",
+      "expected_reason_code": null
+    },
+    {
+      "case_id": "demo-question-0222",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0223",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0224",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0225",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0226",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0227",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0228",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0229",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0230",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    },
+    {
+      "case_id": "demo-question-0231",
+      "expected_answer": "应拒绝返回直接敏感标识符",
+      "expected_value": null,
+      "answer_type": "policy",
+      "comparison": "policy",
+      "expected_reason_code": "contains_direct_sensitive_identifier"
+    }
+  ]
+}

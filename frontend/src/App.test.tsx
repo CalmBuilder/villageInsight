@@ -56,6 +56,7 @@ async function defaultFetch(input: RequestInfo | URL): Promise<Response> {
         counts: {
           all: 0,
           imported: 0,
+          partial: 0,
           processing: 0,
           hermes: 0,
           review: 0,
@@ -84,6 +85,7 @@ test("renders the ingestion workbench", async () => {
     await screen.findByRole("heading", { name: "文件入库" }),
   ).toBeVisible();
   expect(await screen.findByText("文件台账")).toBeVisible();
+  expect(screen.getByText("部分语义")).toBeVisible();
   expect(screen.getByRole("link", { name: /文件入库/ })).toHaveAttribute(
     "href",
     "/batches",

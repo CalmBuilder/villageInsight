@@ -56,6 +56,7 @@ class ItemStatus(StrEnum):
     READY = "ready"
     MATERIALIZING = "materializing"
     IMPORTED = "imported"
+    RESULT_DELETED = "result_deleted"
     FAILED = "failed"
 
 
@@ -64,6 +65,7 @@ class JobStatus(StrEnum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class EvidenceStatus(StrEnum):
@@ -79,7 +81,16 @@ class FormalImportStatus(StrEnum):
     IMPORTED = "imported"
     PARTIAL = "partial"
     PENDING_REBUILD = "pending_rebuild"
+    DELETED = "deleted"
     FAILED = "failed"
+
+
+class BuildResultDeletionStatus(StrEnum):
+    ACTIVE = "active"
+    PENDING = "deletion_pending"
+    DELETING = "deleting"
+    DELETED = "deleted"
+    FAILED = "deletion_failed"
 
 
 class TemplateStatus(StrEnum):
@@ -277,6 +288,7 @@ class IngestionBatch(Base):
     total_files: Mapped[int] = mapped_column(Integer, default=0)
     completed_files: Mapped[int] = mapped_column(Integer, default=0)
     failed_files: Mapped[int] = mapped_column(Integer, default=0)
+    deleted_files: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
@@ -343,6 +355,17 @@ class IngestionItem(Base):
     parser_name: Mapped[str | None] = mapped_column(String(80))
     error_code: Mapped[str | None] = mapped_column(String(80))
     error_message: Mapped[str | None] = mapped_column(Text)
+    build_result_deletion_status: Mapped[str] = mapped_column(
+        String(32),
+        default=BuildResultDeletionStatus.ACTIVE,
+    )
+    build_result_deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    build_result_deleted_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
@@ -367,6 +390,43 @@ class IngestionItem(Base):
         back_populates="item",
         cascade="all, delete-orphan",
     )
+
+
+class IngestionBuildResultDeletion(Base):
+    __tablename__ = "ingestion_build_result_deletions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("ingestion_items.id", ondelete="RESTRICT"),
+        unique=True,
+        index=True,
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    administrative_unit_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("administrative_units.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    batch_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("ingestion_batches.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    requested_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+    )
+    source_sha256: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    manifest: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, default=dict)
+    deleted_counts: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, default=dict)
+    retired_counts: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, default=dict)
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class DocumentProfile(Base):
@@ -489,6 +549,11 @@ class SemanticFieldVersion(Base):
     unit_dimension: Mapped[str | None] = mapped_column(String(80))
     aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
     validators: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    source: Mapped[str] = mapped_column(String(40), default="legacy")
+    source_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSON_DOCUMENT,
+        default=dict,
+    )
     status: Mapped[str] = mapped_column(String(32), default=TemplateStatus.DRAFT)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -598,6 +663,13 @@ class TemplateVersion(Base):
     definition: Mapped[dict[str, Any]] = mapped_column(JSON)
     source: Mapped[str] = mapped_column(String(32), default="manual")
     source_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    build_result_retired_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    build_result_retired_by_deletion_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("ingestion_build_result_deletions.id", ondelete="RESTRICT"),
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     template: Mapped[DocumentTemplate] = relationship(back_populates="versions")
@@ -1043,6 +1115,13 @@ class TemplateProposal(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    build_result_retired_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    build_result_retired_by_deletion_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("ingestion_build_result_deletions.id", ondelete="RESTRICT"),
+        index=True,
+    )
 
 
 class GovernanceResolution(Base):
@@ -1409,6 +1488,13 @@ class ApprovedImportPlan(Base):
     )
     approval_comment: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    build_result_retired_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    build_result_retired_by_deletion_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("ingestion_build_result_deletions.id", ondelete="RESTRICT"),
+        index=True,
+    )
 
     item: Mapped[IngestionItem] = relationship(back_populates="approved_import_plans")
 

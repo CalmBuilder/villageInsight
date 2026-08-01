@@ -21,6 +21,7 @@ from village_insight.hermes.runtime import (
     HermesCallPolicy,
 )
 from village_insight.parsing.router import ParserRouter
+from village_insight.source_paths import resolve_source_path
 from village_insight.templates.matching import layout_fingerprint
 
 STRUCTURE_DECISION_CONTRACT = "four-layer-structure-review/v1"
@@ -293,7 +294,7 @@ async def resolve_unresolved_structures(
         route_code = str(item["route_code"])
         if route_code in decisions and decisions[route_code].get("status") == "resolved":
             continue
-        path = Path(str(item["source_path"]))
+        path = resolve_source_path(str(item["source_path"]))
         try:
             profile = ParserRouter().profile(path)
             region_decisions: list[dict[str, Any]] = []

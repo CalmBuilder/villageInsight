@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-DocumentFormat = Literal["xlsx", "xls", "csv"]
+DocumentFormat = Literal["xlsx", "xls", "excel_html", "csv"]
 
 
 class Bounds(BaseModel):

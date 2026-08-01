@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     )
     upload_root: Path = Path("data/uploads")
     secret_key_path: Path = Path("data/secrets/settings.key")
+    source_path_manifest: Path | None = None
     import_roots: Annotated[list[Path], NoDecode] = [Path("data/import")]
     max_upload_bytes: int = 100 * 1024 * 1024
     max_batch_files: int = 500
@@ -49,6 +50,10 @@ class Settings(BaseSettings):
     hermes_thinking_enabled: bool = False
     hermes_reasoning_effort: str = "high"
     hermes_timeout_seconds: int = 120
+    # Upper bound for the complete multi-stage ingestion recognition task. Each
+    # provider call keeps its narrower timeout; this prevents their sum, fallbacks,
+    # and reviews from holding a worker lease indefinitely.
+    hermes_recognition_timeout_seconds: Annotated[int, Field(gt=0)] = 900
     hermes_enabled_toolsets: Annotated[list[str], NoDecode] = []
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
     session_cookie_name: str = "vi_session"
@@ -76,6 +81,11 @@ class Settings(BaseSettings):
 
     def resolved_secret_key_path(self) -> Path:
         return self.secret_key_path.expanduser().resolve()
+
+    def resolved_source_path_manifest(self) -> Path | None:
+        if self.source_path_manifest is None:
+            return None
+        return self.source_path_manifest.expanduser().resolve()
 
     def resolved_import_roots(self) -> tuple[Path, ...]:
         return tuple(root.expanduser().resolve() for root in self.import_roots)

@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ReviewFieldEvidence, SemanticField } from "../lib/api";
-import { initialResolution, ReviewsPage } from "./ReviewsPage";
+import { ReviewsPage } from "./ReviewsPage";
+import { initialResolution } from "./reviewResolution";
 
 const api = vi.hoisted(() => ({
   getFields: vi.fn(),
@@ -88,6 +89,11 @@ test("does not preselect a weak type-compatible candidate", () => {
     version: 1,
     status: "published",
     published_version: 1,
+    source: "validated_baseline",
+    source_metadata: {
+      source_contract: "four-layer-template-source/v1",
+      source: "validated_baseline",
+    },
   };
 
   expect(initialResolution(evidence, [field])).toMatchObject({

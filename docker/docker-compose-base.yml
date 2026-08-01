@@ -5,37 +5,51 @@ services:
     command:
       - postgres
       - -c
-      - shared_buffers=1GB
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-512MB}
       - -c
-      - effective_cache_size=8GB
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-2GB}
       - -c
-      - work_mem=8MB
+      - work_mem=${POSTGRES_WORK_MEM:-4MB}
       - -c
-      - maintenance_work_mem=256MB
+      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-128MB}
       - -c
-      - wal_buffers=16MB
+      - wal_buffers=${POSTGRES_WAL_BUFFERS:-16MB}
       - -c
-      - checkpoint_completion_target=0.9
+      - checkpoint_timeout=${POSTGRES_CHECKPOINT_TIMEOUT:-5min}
       - -c
-      - max_wal_size=4GB
+      - checkpoint_completion_target=${POSTGRES_CHECKPOINT_COMPLETION_TARGET:-0.9}
       - -c
-      - min_wal_size=1GB
+      - max_wal_size=${POSTGRES_MAX_WAL_SIZE:-1GB}
+      - -c
+      - min_wal_size=${POSTGRES_MIN_WAL_SIZE:-256MB}
+      - -c
+      - wal_compression=${POSTGRES_WAL_COMPRESSION:-on}
+      - -c
+      - temp_file_limit=${POSTGRES_TEMP_FILE_LIMIT:-2GB}
+      - -c
+      - log_temp_files=${POSTGRES_LOG_TEMP_FILES:-100MB}
+      - -c
+      - idle_in_transaction_session_timeout=${POSTGRES_IDLE_TRANSACTION_TIMEOUT:-5min}
+      - -c
+      - log_checkpoints=${POSTGRES_LOG_CHECKPOINTS:-on}
     ports:
-      - "${EXPOSE_POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_BIND_ADDRESS:-127.0.0.1}:${EXPOSE_POSTGRES_PORT:-5432}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - "${POSTGRES_DATA_DIR:-postgres_data}:/var/lib/postgresql/data"
     networks:
       - village-insight
     healthcheck:
       test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
-        ]
+        - CMD-SHELL
+        - >-
+          pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" &&
+          available_kb=$$(df -Pk "$${PGDATA}" | awk 'NR == 2 {print $$4}') &&
+          test "$${available_kb}" -ge
+          "$$(( $${POSTGRES_MIN_FREE_DISK_MB:-4096} * 1024 ))"
       interval: 10s
       timeout: 10s
       retries: 30
-      start_period: 10s
+      start_period: 30s
     restart: unless-stopped
 
 volumes:

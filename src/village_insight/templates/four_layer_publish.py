@@ -27,12 +27,116 @@ from village_insight.db.models import (
 )
 from village_insight.db.session import get_session_factory
 from village_insight.templates.field_variants import build_field_variant
+from village_insight.templates.sources import (
+    VALIDATED_CORPUS_SOURCE,
+    source_metadata,
+)
 
 ACTOR = "system:codex-full-corpus"
 
 
 def _next_version(versions: list[Any]) -> int:
     return max((int(version.version) for version in versions), default=0) + 1
+
+
+def _deprecate_superseded_validated_corpus(
+    database: Session,
+    *,
+    region_codes: set[str],
+    sheet_codes: set[str],
+    route_codes: set[str],
+    generation: str,
+) -> dict[str, int]:
+    counts = {
+        "regions_deprecated": 0,
+        "sheets_deprecated": 0,
+        "routes_deprecated": 0,
+    }
+    for template in database.scalars(select(RegionTemplate)):
+        current_region = next(
+            (
+                version
+                for version in template.versions
+                if version.version == template.published_version
+            ),
+            None,
+        )
+        if (
+            template.code in region_codes
+            or current_region is None
+            or current_region.source != VALIDATED_CORPUS_SOURCE
+        ):
+            continue
+        current_region.status = TemplateStatus.DEPRECATED
+        template.published_version = None
+        database.add(
+            RegionTemplateReviewEvent(
+                region_template_version=current_region,
+                action="superseded_corpus_package",
+                from_status=TemplateStatus.PUBLISHED,
+                to_status=TemplateStatus.DEPRECATED,
+                actor=ACTOR,
+                actor_type="system",
+                comment=f"由完整稳定语料包替代 {generation}",
+            )
+        )
+        counts["regions_deprecated"] += 1
+    for composition in database.scalars(select(SheetComposition)):
+        current_sheet = next(
+            (
+                version
+                for version in composition.versions
+                if version.version == composition.published_version
+            ),
+            None,
+        )
+        if (
+            composition.code in sheet_codes
+            or current_sheet is None
+            or current_sheet.source != VALIDATED_CORPUS_SOURCE
+        ):
+            continue
+        current_sheet.status = TemplateStatus.DEPRECATED
+        composition.published_version = None
+        database.add(
+            SheetCompositionReviewEvent(
+                sheet_composition_version=current_sheet,
+                action="superseded_corpus_package",
+                from_status=TemplateStatus.PUBLISHED,
+                to_status=TemplateStatus.DEPRECATED,
+                actor=ACTOR,
+                actor_type="system",
+                comment=f"由完整稳定语料包替代 {generation}",
+            )
+        )
+        counts["sheets_deprecated"] += 1
+    for route in database.scalars(select(WorkbookRoute)):
+        current_route = next(
+            (version for version in route.versions if version.version == route.published_version),
+            None,
+        )
+        if (
+            route.code in route_codes
+            or current_route is None
+            or current_route.source != VALIDATED_CORPUS_SOURCE
+        ):
+            continue
+        current_route.status = TemplateStatus.DEPRECATED
+        route.published_version = None
+        database.add(
+            WorkbookRouteReviewEvent(
+                workbook_route_version=current_route,
+                action="superseded_corpus_package",
+                from_status=TemplateStatus.PUBLISHED,
+                to_status=TemplateStatus.DEPRECATED,
+                actor=ACTOR,
+                actor_type="system",
+                comment=f"由完整稳定语料包替代 {generation}",
+            )
+        )
+        counts["routes_deprecated"] += 1
+    database.flush()
+    return counts
 
 
 def stage_published_package(
@@ -51,6 +155,13 @@ def stage_published_package(
         "sheets_reused": 0,
         "routes_created": 0,
         "routes_reused": 0,
+        **_deprecate_superseded_validated_corpus(
+            database,
+            region_codes={str(row["code"]) for row in package["region_templates"]},
+            sheet_codes={str(row["code"]) for row in package["sheet_compositions"]},
+            route_codes={str(row["code"]) for row in package["workbook_routes"]},
+            generation=generation,
+        ),
     }
     for definition in package["semantic_fields"]:
         code = str(definition["code"])
@@ -83,6 +194,11 @@ def stage_published_package(
             unit_dimension=definition.get("unit_dimension"),
             aliases=[str(alias) for alias in definition.get("aliases", [])],
             validators=[],
+            source=VALIDATED_CORPUS_SOURCE,
+            source_metadata=source_metadata(
+                source=VALIDATED_CORPUS_SOURCE,
+                metadata={"generation_sha256": generation},
+            ),
             status=TemplateStatus.PUBLISHED,
         )
         variant_keys: set[str] = set()
@@ -90,7 +206,7 @@ def stage_published_package(
             {
                 "kind": "alias",
                 "alias": alias,
-                "source": "codex",
+                "source": VALIDATED_CORPUS_SOURCE,
                 "confidence_basis_points": 10_000,
                 "evidence": {"generation_sha256": generation},
             }
@@ -100,7 +216,7 @@ def stage_published_package(
             {
                 "kind": "header_path",
                 "header_path": [str(part) for part in header_path],
-                "source": "codex",
+                "source": VALIDATED_CORPUS_SOURCE,
                 "confidence_basis_points": 10_000,
                 "evidence": {"generation_sha256": generation},
             }
@@ -132,17 +248,14 @@ def stage_published_package(
     regions_by_code: dict[str, tuple[RegionTemplate, RegionTemplateVersion]] = {}
     for definition in package["region_templates"]:
         code = str(definition["code"])
-        template = database.scalar(
-            select(RegionTemplate).where(RegionTemplate.code == code)
-        )
+        template = database.scalar(select(RegionTemplate).where(RegionTemplate.code == code))
         current_region_version = (
             next(
                 (
                     version
                     for version in template.versions
                     if version.version == template.published_version
-                    and version.region_fingerprint
-                    == definition["region_fingerprint"]
+                    and version.region_fingerprint == definition["region_fingerprint"]
                 ),
                 None,
             )
@@ -150,9 +263,12 @@ def stage_published_package(
             else None
         )
         if template is not None and current_region_version is not None:
-            regions_by_code[code] = (template, current_region_version)
-            counts["regions_reused"] += 1
-            continue
+            if (current_region_version.source_metadata or {}).get(
+                "generation_sha256"
+            ) == generation:
+                regions_by_code[code] = (template, current_region_version)
+                counts["regions_reused"] += 1
+                continue
         if template is None:
             template = RegionTemplate(code=code)
             database.add(template)
@@ -171,20 +287,25 @@ def stage_published_package(
             field_bindings=[
                 {
                     **binding,
-                    "semantic_field_version": fields_by_code[
-                        str(binding["semantic_field_code"])
-                    ][1].version,
+                    "semantic_field_version": fields_by_code[str(binding["semantic_field_code"])][
+                        1
+                    ].version,
                 }
                 for binding in definition["field_bindings"]
             ],
             identity_policy={},
             quality_rules=[],
-            source="codex",
-            source_metadata={
-                "generation_sha256": generation,
-                "evidence": definition["evidence"],
-                "header_variants": definition.get("header_variants", []),
-            },
+            source=VALIDATED_CORPUS_SOURCE,
+            source_metadata=source_metadata(
+                source=VALIDATED_CORPUS_SOURCE,
+                metadata={
+                    "generation_sha256": generation,
+                    "evidence": definition["evidence"],
+                    "header_variants": definition.get("header_variants", []),
+                    "ignored_header_paths": definition.get("ignored_header_paths", []),
+                    "ignored_columns": definition.get("ignored_columns", []),
+                },
+            ),
         )
         for old_region_version in template.versions:
             if old_region_version.status == TemplateStatus.PUBLISHED:
@@ -209,17 +330,14 @@ def stage_published_package(
     sheets_by_code: dict[str, tuple[SheetComposition, SheetCompositionVersion]] = {}
     for definition in package["sheet_compositions"]:
         code = str(definition["code"])
-        composition = database.scalar(
-            select(SheetComposition).where(SheetComposition.code == code)
-        )
+        composition = database.scalar(select(SheetComposition).where(SheetComposition.code == code))
         current_sheet_version = (
             next(
                 (
                     version
                     for version in composition.versions
                     if version.version == composition.published_version
-                    and version.composition_fingerprint
-                    == definition["composition_fingerprint"]
+                    and version.composition_fingerprint == definition["composition_fingerprint"]
                 ),
                 None,
             )
@@ -227,9 +345,10 @@ def stage_published_package(
             else None
         )
         if composition is not None and current_sheet_version is not None:
-            sheets_by_code[code] = (composition, current_sheet_version)
-            counts["sheets_reused"] += 1
-            continue
+            if (current_sheet_version.source_metadata or {}).get("generation_sha256") == generation:
+                sheets_by_code[code] = (composition, current_sheet_version)
+                counts["sheets_reused"] += 1
+                continue
         if composition is None:
             composition = SheetComposition(code=code)
             database.add(composition)
@@ -240,13 +359,14 @@ def stage_published_package(
             status=TemplateStatus.PUBLISHED,
             composition_fingerprint=str(definition["composition_fingerprint"]),
             matching_rules={},
-            source="codex",
-            source_metadata={"generation_sha256": generation},
+            source=VALIDATED_CORPUS_SOURCE,
+            source_metadata=source_metadata(
+                source=VALIDATED_CORPUS_SOURCE,
+                metadata={"generation_sha256": generation},
+            ),
         )
         for slot in definition["region_slots"]:
-            region, region_version = regions_by_code[
-                str(slot["region_template_code"])
-            ]
+            region, region_version = regions_by_code[str(slot["region_template_code"])]
             sheet_version.region_slots.append(
                 SheetCompositionRegionSlot(
                     slot_key=str(slot["slot_key"]),
@@ -289,8 +409,7 @@ def stage_published_package(
                     for version in route.versions
                     if version.version == route.published_version
                     and version.route_fingerprint == definition["route_fingerprint"]
-                    and version.source_metadata.get("generation_sha256")
-                    == generation
+                    and version.source_metadata.get("generation_sha256") == generation
                 ),
                 None,
             )
@@ -310,17 +429,18 @@ def stage_published_package(
             status=TemplateStatus.PUBLISHED,
             route_fingerprint=str(definition["route_fingerprint"]),
             matching_rules={},
-            source="codex",
-            source_metadata={
-                "generation_sha256": generation,
-                "members": definition["members"],
-                "ignored_regions": definition.get("ignored_regions", []),
-            },
+            source=VALIDATED_CORPUS_SOURCE,
+            source_metadata=source_metadata(
+                source=VALIDATED_CORPUS_SOURCE,
+                metadata={
+                    "generation_sha256": generation,
+                    "members": definition["members"],
+                    "ignored_regions": definition.get("ignored_regions", []),
+                },
+            ),
         )
         for slot in definition["sheet_slots"]:
-            composition, composition_version = sheets_by_code[
-                str(slot["sheet_composition_code"])
-            ]
+            composition, composition_version = sheets_by_code[str(slot["sheet_composition_code"])]
             route_version.sheet_slots.append(
                 WorkbookRouteSheetSlot(
                     slot_key=str(slot["slot_key"]),
@@ -355,20 +475,14 @@ def stage_published_package(
 
 
 def read_publishable_package(directory: Path) -> dict[str, Any]:
-    validation = json.loads(
-        (directory / "validation-report.json").read_text(encoding="utf-8")
-    )
+    validation = json.loads((directory / "validation-report.json").read_text(encoding="utf-8"))
     if not validation.get("safe_to_publish"):
         raise ValueError(
             "four-layer package is not safe to publish: "
             + ", ".join(validation.get("publication_blockers", []))
         )
-    coverage = json.loads(
-        (directory / "coverage-manifest.json").read_text(encoding="utf-8")
-    )
-    manifest = json.loads(
-        (directory / "generation-manifest.json").read_text(encoding="utf-8")
-    )
+    coverage = json.loads((directory / "coverage-manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads((directory / "generation-manifest.json").read_text(encoding="utf-8"))
     return {
         **manifest,
         "semantic_fields": json.loads(

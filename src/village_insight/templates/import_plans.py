@@ -33,7 +33,7 @@ from village_insight.templates.field_semantics import (
     analyze_header_path,
     header_paths_equivalent,
 )
-from village_insight.templates.matching import profile_regions
+from village_insight.templates.matching import profile_region_candidates
 
 
 class ImportPlanError(ValueError):
@@ -118,9 +118,15 @@ def resolve_reused_region_column(
             column
             for column in current_columns
             if column.column == physical_column_number
-            and header_paths_equivalent(
-                path,
-                _normalized_path(column.header_path),
+            and (
+                header_paths_equivalent(
+                    path,
+                    _normalized_path(column.header_path),
+                )
+                or _same_header_leaf(
+                    path,
+                    _normalized_path(column.header_path),
+                )
             )
         ]
         if len(physical_columns) == 1:
@@ -138,6 +144,15 @@ def resolve_reused_region_column(
 
 def _normalized_path(path: list[str]) -> tuple[str, ...]:
     return tuple(" ".join(part.split()) for part in path if part.strip())
+
+
+def _same_header_leaf(
+    expected: list[str] | tuple[str, ...],
+    actual: list[str] | tuple[str, ...],
+) -> bool:
+    expected_path = _normalized_path(list(expected))
+    actual_path = _normalized_path(list(actual))
+    return bool(expected_path and actual_path and expected_path[-1] == actual_path[-1])
 
 
 def _header_signature(candidate: Any) -> tuple[tuple[str, ...], ...]:
@@ -195,9 +210,7 @@ def _merge_governance_replacement_mappings(
     confirmed_mappings: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Preserve prior resolved mappings and let confirmed decisions override them."""
-    confirmed_source_columns = {
-        str(mapping["source_column_id"]) for mapping in confirmed_mappings
-    }
+    confirmed_source_columns = {str(mapping["source_column_id"]) for mapping in confirmed_mappings}
     inherited = [
         mapping
         for mapping in provisional_mappings
@@ -421,6 +434,8 @@ def approve_plan(
     primary_region_template_id: uuid.UUID | None = None,
     primary_region_template_version: int | None = None,
 ) -> ApprovedImportPlan:
+    if item.build_result_deletion_status != "active":
+        raise ImportPlanError("该文件的构建产物已删除或正在删除，请上传新版文件")
     latest = database.scalar(
         select(ApprovedImportPlan)
         .where(ApprovedImportPlan.item_id == item.id)
@@ -448,6 +463,7 @@ def approve_plan(
                 TemplateVersion.template_id == template_id,
                 TemplateVersion.version == template_version,
                 TemplateVersion.status == allowed_status,
+                TemplateVersion.build_result_retired_at.is_(None),
             )
         )
         if template_id is not None and template_version is not None
@@ -473,6 +489,7 @@ def approve_plan(
         if (
             proposal is None
             or proposal.source_item_id != item.id
+            or proposal.build_result_retired_at is not None
             or version is None
             or str(version.source_metadata.get("proposal_id")) != str(proposal.id)
         ):
@@ -535,9 +552,7 @@ def approve_plan(
             layout_plan = latest.layout_plan
         else:
             if version is None:
-                raise ImportPlanError(
-                    "independent Region plans require explicit layout decisions"
-                )
+                raise ImportPlanError("independent Region plans require explicit layout decisions")
             if version.source_metadata.get("approved_layout_plan"):
                 layout_plan = project_layout_plan(
                     database,
@@ -635,7 +650,7 @@ def build_reused_region_fragments(
     profile = load_workbook_profile(profile_record)
     current_regions = {
         (region.sheet.id, region.region.id, region.header.id): region
-        for region in profile_regions(profile)
+        for region in profile_region_candidates(profile)
     }
     matches = list(
         database.scalars(
@@ -886,12 +901,8 @@ def build_reused_field_match_mappings(
     reused_mappings: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Add resolved field-level matches owned by the supplied Region decisions."""
-    mapped_source_columns = {
-        str(mapping["source_column_id"]) for mapping in reused_mappings
-    }
-    reused_region_ids = {
-        str(decision["region_candidate_id"]) for decision in reused_decisions
-    }
+    mapped_source_columns = {str(mapping["source_column_id"]) for mapping in reused_mappings}
+    reused_region_ids = {str(decision["region_candidate_id"]) for decision in reused_decisions}
     headerless_region_ids = {
         str(decision["region_candidate_id"])
         for decision in reused_decisions
@@ -920,15 +931,11 @@ def build_reused_field_match_mappings(
             "normalizer": None,
             "required": False,
             "field_match_id": str(field_match.id),
-            "role_source": (
-                "field_match_context" if field_match.context.get("role") else None
-            ),
+            "role_source": ("field_match_context" if field_match.context.get("role") else None),
         }
         if field_match.region_id in headerless_region_ids:
             try:
-                physical_column = int(
-                    field_match.source_column_id.rsplit(":column:", 1)[1]
-                )
+                physical_column = int(field_match.source_column_id.rsplit(":column:", 1)[1])
             except (IndexError, ValueError) as exc:
                 raise ImportPlanError(
                     "headerless field match has no physical column identity"
@@ -1076,8 +1083,7 @@ def approve_hybrid_region_plan(
         if decision.get("layout_mode") == "headerless_table"
     }
     mapped_source_columns = {
-        str(mapping["source_column_id"])
-        for mapping in [*reused_mappings, *resolved_field_mappings]
+        str(mapping["source_column_id"]) for mapping in [*reused_mappings, *resolved_field_mappings]
     }
     profile_record = database.get(DocumentProfile, item.id)
     if profile_record is None:
@@ -1120,9 +1126,7 @@ def approve_hybrid_region_plan(
             if candidate.id == match.header_id and candidate.region_id == match.region_id
         ]
         if len(candidates) != 1:
-            raise ImportPlanError(
-                "reused Region does not resolve to one approved header"
-            )
+            raise ImportPlanError("reused Region does not resolve to one approved header")
         approved_headers[match.region_id] = candidates[0]
     approved_field_regions = materialized_hermes_regions | reused_region_ids
     source_columns = {
@@ -1143,9 +1147,7 @@ def approve_hybrid_region_plan(
     hermes_field_mappings: list[dict[str, Any]] = []
     for decision in hermes_field_decisions or []:
         action = str(decision.get("action") or "")
-        field_code = decision.get("semantic_field_code") or decision.get(
-            "proposed_field_code"
-        )
+        field_code = decision.get("semantic_field_code") or decision.get("proposed_field_code")
         source_column_id = str(decision.get("source_column_id") or "")
         source = source_columns.get(source_column_id)
         field_version = published_fields.get(str(field_code))

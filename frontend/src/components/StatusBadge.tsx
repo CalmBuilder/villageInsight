@@ -2,7 +2,7 @@ const labels: Record<string, string> = {
   pending: "待处理",
   running: "处理中",
   completed: "已完成",
-  partial: "部分入库 · 待治理",
+  partial: "已入库 · 部分语义",
   failed: "失败",
   profiling: "提取证据",
   matching: "匹配模板",
@@ -34,7 +34,7 @@ function toneForStatus(status: string): StatusTone {
   if (["running", "profiling", "matching", "recognizing", "materializing"].includes(status)) {
     return "progress";
   }
-  if (["pending", "needs_review", "partial", "admin_review", "pending_rebuild", "draft", "user_confirmed"].includes(status)) {
+  if (["pending", "needs_review", "admin_review", "pending_rebuild", "draft", "user_confirmed"].includes(status)) {
     return "review";
   }
   if (["failed", "rejected"].includes(status)) return "danger";

@@ -8,28 +8,33 @@ import socket
 import threading
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Awaitable, Iterator
 from contextlib import contextmanager
-from pathlib import Path
+from typing import Any
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from village_insight.build_result_deletion import delete_build_result
 from village_insight.config import get_settings
 from village_insight.db.models import (
     BatchStatus,
+    BuildResultDeletionStatus,
     DocumentProfile,
     DocumentSheetCatalog,
     EvidenceStatus,
     FieldMatch,
     FormalImportStatus,
     IngestionBatch,
+    IngestionBuildResultDeletion,
     IngestionItem,
     ItemStatus,
     Job,
     JobStatus,
     QualityIssue,
     TemplateMatch,
+    TemplateProposal,
 )
 from village_insight.db.session import get_session_factory
 from village_insight.hermes.configuration import resolve_configuration
@@ -42,8 +47,21 @@ from village_insight.hermes.recognition import (
     published_semantic_catalog,
     recognize_differences,
 )
-from village_insight.hermes.runtime import EmbeddedHermesRuntime
-from village_insight.jobs.queue import claim, enqueue_for_item, fail, renew, succeed
+from village_insight.hermes.runtime import (
+    EmbeddedHermesRuntime,
+    HermesOperatorActionRequiredError,
+    HermesUnavailableError,
+)
+from village_insight.jobs.queue import (
+    MATERIALIZATION_JOB_MAX_ATTEMPTS,
+    claim,
+    defer_for_operator_action,
+    enqueue_for_item,
+    fail,
+    release_for_shutdown,
+    renew,
+    succeed,
+)
 from village_insight.logging import configure_logging
 from village_insight.materialization import materialize_plan
 from village_insight.parsing.profile_storage import (
@@ -52,6 +70,7 @@ from village_insight.parsing.profile_storage import (
 )
 from village_insight.parsing.router import ParserRouter
 from village_insight.resources import read_memory_snapshot
+from village_insight.source_paths import resolve_source_path
 from village_insight.templates.import_plans import (
     ImportPlanError,
     approve_hybrid_region_plan,
@@ -65,8 +84,60 @@ LANE_JOB_KINDS: dict[str, tuple[str, ...] | None] = {
     "all": None,
     "parse": ("PROFILE_FILE", "MATCH_TEMPLATE"),
     "hermes": ("RECOGNIZE_TEMPLATE_DIFF",),
-    "materialize": ("MATERIALIZE_FILE",),
+    "materialize": ("MATERIALIZE_FILE", "DELETE_BUILD_RESULT"),
 }
+
+
+def safe_job_error(exc: Exception) -> str:
+    """Return an operational error description that cannot contain row values."""
+    code = str(getattr(exc, "code", "") or "")[:80]
+    if isinstance(exc, SQLAlchemyError):
+        original = getattr(exc, "orig", None)
+        sqlstate = str(getattr(original, "sqlstate", "") or "")[:20]
+        suffix = f" sqlstate={sqlstate}" if sqlstate else ""
+        return f"{type(exc).__name__}: database operation failed{suffix}"
+    suffix = f" code={code}" if code else ""
+    return f"{type(exc).__name__}{suffix}"
+
+
+async def await_recognition_with_total_timeout(
+    recognition: Awaitable[TemplateProposal],
+    *,
+    timeout_seconds: int,
+    cancel_event: threading.Event | None = None,
+) -> TemplateProposal:
+    recognition_task = asyncio.ensure_future(recognition)
+    cancellation_task: asyncio.Task[None] | None = None
+
+    async def wait_for_cancellation() -> None:
+        assert cancel_event is not None
+        while not cancel_event.is_set():
+            await asyncio.sleep(0.1)
+
+    if cancel_event is not None:
+        cancellation_task = asyncio.create_task(wait_for_cancellation())
+    try:
+        waiters: set[asyncio.Future[Any]] = {recognition_task}
+        if cancellation_task is not None:
+            waiters.add(cancellation_task)
+        done, _ = await asyncio.wait(
+            waiters,
+            timeout=timeout_seconds,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if recognition_task in done:
+            return recognition_task.result()
+        recognition_task.cancel()
+        await asyncio.gather(recognition_task, return_exceptions=True)
+        if cancellation_task is not None and cancellation_task in done:
+            raise HermesUnavailableError("Hermes recognition task was cancelled")
+        raise HermesUnavailableError(
+            "Hermes recognition task exceeded its total runtime limit"
+        )
+    finally:
+        if cancellation_task is not None:
+            cancellation_task.cancel()
+            await asyncio.gather(cancellation_task, return_exceptions=True)
 
 
 @contextmanager
@@ -140,7 +211,10 @@ def refresh_batch(database: Session, batch_id: uuid.UUID) -> None:
         0,
     )
     batch.failed_files = counts.get(FormalImportStatus.FAILED, 0)
-    finished = batch.completed_files + partial_files + batch.failed_files
+    batch.deleted_files = counts.get(FormalImportStatus.DELETED, 0)
+    finished = (
+        batch.completed_files + partial_files + batch.failed_files + batch.deleted_files
+    )
     if finished == 0:
         batch.status = BatchStatus.RUNNING if active_files else BatchStatus.PENDING
     elif finished < batch.total_files:
@@ -160,7 +234,7 @@ def profile_file(database: Session, item_id: uuid.UUID) -> None:
     item.status = ItemStatus.PROFILING
     database.commit()
     try:
-        profile = ParserRouter().profile(Path(item.source_path))
+        profile = ParserRouter().profile(resolve_source_path(item.source_path))
     except Exception as exc:
         item = database.get(IngestionItem, item_id)
         if item is not None:
@@ -276,7 +350,7 @@ def match_template(database: Session, item_id: uuid.UUID) -> None:
                 kind="MATERIALIZE_FILE",
                 payload={"plan_id": str(plan.id)},
                 idempotency_key=f"materialize:{plan.id}",
-                max_attempts=1,
+                max_attempts=MATERIALIZATION_JOB_MAX_ATTEMPTS,
             )
             item.error_code = None
             item.error_message = None
@@ -287,7 +361,12 @@ def match_template(database: Session, item_id: uuid.UUID) -> None:
     database.commit()
 
 
-def recognize_template_diff(database: Session, item_id: uuid.UUID) -> None:
+def recognize_template_diff(
+    database: Session,
+    item_id: uuid.UUID,
+    *,
+    cancel_event: threading.Event | None = None,
+) -> None:
     settings = get_settings()
     item = database.get(IngestionItem, item_id)
     profile_record = database.get(DocumentProfile, item_id)
@@ -311,15 +390,19 @@ def recognize_template_diff(database: Session, item_id: uuid.UUID) -> None:
     connection = resolved.connection
     runtime = EmbeddedHermesRuntime(settings, connection)
     proposal = asyncio.run(
-        recognize_differences(
-            database,
-            item_id=item.id,
-            request=request,
-            profile=profile,
-            runtime=runtime,
-            provider=connection.provider,
-            model=connection.fast_model or connection.model,
-            reasoning_model=connection.reasoning_model or connection.model,
+        await_recognition_with_total_timeout(
+            recognize_differences(
+                database,
+                item_id=item.id,
+                request=request,
+                profile=profile,
+                runtime=runtime,
+                provider=connection.provider,
+                model=connection.fast_model or connection.model,
+                reasoning_model=connection.reasoning_model or connection.model,
+            ),
+            timeout_seconds=settings.hermes_recognition_timeout_seconds,
+            cancel_event=cancel_event,
         )
     )
     item = database.get(IngestionItem, item_id)
@@ -372,7 +455,7 @@ def recognize_template_diff(database: Session, item_id: uuid.UUID) -> None:
         kind="MATERIALIZE_FILE",
         payload={"plan_id": str(plan.id)},
         idempotency_key=f"materialize:{plan.id}",
-        max_attempts=1,
+        max_attempts=MATERIALIZATION_JOB_MAX_ATTEMPTS,
     )
     item.error_code = None
     item.error_message = None
@@ -437,13 +520,32 @@ def validate_job_scope(database: Session, job: Job) -> IngestionItem:
     )
     if job_scope != item_scope or item_scope != batch_scope:
         raise ValueError("ingestion job scope does not match item and batch")
+    if (
+        job.kind != "DELETE_BUILD_RESULT"
+        and item.build_result_deletion_status != BuildResultDeletionStatus.ACTIVE
+    ):
+        raise ValueError("ingestion item build result is deleting or deleted")
     return item
+
+
+def delete_build_result_file(
+    database: Session,
+    item_id: uuid.UUID,
+    deletion_id: uuid.UUID,
+) -> None:
+    delete_build_result(
+        database,
+        item_id=item_id,
+        deletion_id=deletion_id,
+    )
+    database.commit()
 
 
 def process_one(
     worker_id: str,
     *,
     allowed_kinds: tuple[str, ...] | None = None,
+    stopped: threading.Event | None = None,
 ) -> bool:
     settings = get_settings()
     session_factory = get_session_factory()
@@ -472,26 +574,85 @@ def process_one(
                 elif job_kind == "MATCH_TEMPLATE":
                     match_template(database, uuid.UUID(payload["item_id"]))
                 elif job_kind == "RECOGNIZE_TEMPLATE_DIFF":
-                    recognize_template_diff(database, uuid.UUID(payload["item_id"]))
+                    recognize_template_diff(
+                        database,
+                        uuid.UUID(payload["item_id"]),
+                        cancel_event=stopped,
+                    )
                 elif job_kind == "MATERIALIZE_FILE":
                     materialize_file(
                         database,
                         uuid.UUID(payload["item_id"]),
                         uuid.UUID(payload["plan_id"]),
                     )
+                elif job_kind == "DELETE_BUILD_RESULT":
+                    delete_build_result_file(
+                        database,
+                        uuid.UUID(payload["item_id"]),
+                        uuid.UUID(payload["deletion_id"]),
+                    )
                 else:
                     raise ValueError(f"unsupported job kind: {job_kind}")
         except Exception as exc:
             database.rollback()
+            safe_error = safe_job_error(exc)
+            operator_action_required = isinstance(
+                exc,
+                HermesOperatorActionRequiredError,
+            )
+            cancelled_for_shutdown = (
+                isinstance(exc, HermesUnavailableError)
+                and stopped is not None
+                and stopped.is_set()
+            )
             with database.begin():
-                fail(
-                    database,
-                    job_id=job_id,
-                    worker_id=worker_id,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
+                if operator_action_required:
+                    defer_for_operator_action(
+                        database,
+                        job_id=job_id,
+                        worker_id=worker_id,
+                        reason=safe_error,
+                    )
+                elif cancelled_for_shutdown:
+                    release_for_shutdown(
+                        database,
+                        job_id=job_id,
+                        worker_id=worker_id,
+                        reason=f"{type(exc).__name__}: {exc}",
+                    )
+                else:
+                    fail(
+                        database,
+                        job_id=job_id,
+                        worker_id=worker_id,
+                        error=safe_error,
+                    )
                 failed_job = database.get(type(job), job_id)
                 if (
+                    failed_job is not None
+                    and failed_job.status == JobStatus.FAILED
+                    and job_kind == "DELETE_BUILD_RESULT"
+                ):
+                    failed_item = database.get(
+                        IngestionItem,
+                        uuid.UUID(payload["item_id"]),
+                    )
+                    deletion_record = database.get(
+                        IngestionBuildResultDeletion,
+                        uuid.UUID(payload["deletion_id"]),
+                    )
+                    if failed_item is not None:
+                        failed_item.build_result_deletion_status = (
+                            BuildResultDeletionStatus.FAILED
+                        )
+                    if deletion_record is not None:
+                        deletion_record.status = "failed"
+                        deletion_record.error_code = str(
+                            getattr(exc, "code", "BUILD_RESULT_DELETE_FAILED")
+                        )[:80]
+                if (
+                    not cancelled_for_shutdown
+                    and
                     failed_job is not None
                     and failed_job.status == JobStatus.FAILED
                     and job_kind in {"PROFILE_FILE", "MATCH_TEMPLATE"}
@@ -508,9 +669,11 @@ def process_one(
                             if job_kind == "PROFILE_FILE"
                             else "TEMPLATE_MATCH_FAILED"
                         )
-                        failed_item.error_message = str(exc)[:4000]
+                        failed_item.error_message = safe_error
                         refresh_batch(database, failed_item.batch_id)
                 if (
+                    not cancelled_for_shutdown
+                    and
                     failed_job is not None
                     and failed_job.status == JobStatus.FAILED
                     and job_kind == "RECOGNIZE_TEMPLATE_DIFF"
@@ -523,9 +686,11 @@ def process_one(
                         failed_item.status = ItemStatus.NEEDS_REVIEW
                         failed_item.formal_import_status = FormalImportStatus.NEEDS_REVIEW
                         failed_item.error_code = "HERMES_RECOGNITION_FAILED"
-                        failed_item.error_message = str(exc)[:4000]
+                        failed_item.error_message = safe_error
                         refresh_batch(database, failed_item.batch_id)
                 if (
+                    not cancelled_for_shutdown
+                    and
                     failed_job is not None
                     and failed_job.status == JobStatus.FAILED
                     and job_kind == "MATERIALIZE_FILE"
@@ -538,7 +703,7 @@ def process_one(
                         failed_item.status = ItemStatus.FAILED
                         failed_item.formal_import_status = FormalImportStatus.FAILED
                         failed_item.error_code = "MATERIALIZATION_FAILED"
-                        failed_item.error_message = str(exc)[:4000]
+                        failed_item.error_message = safe_error
                         database.add(
                             QualityIssue(
                                 item_id=failed_item.id,
@@ -551,12 +716,35 @@ def process_one(
                                     )
                                 )[:80],
                                 severity="error",
-                                message=str(exc)[:4000],
+                                message=safe_error,
                                 evidence={"job_id": str(job_id)},
                             )
                         )
                         refresh_batch(database, failed_item.batch_id)
-            logger.exception("job failed", extra={"job_id": str(job_id)})
+            if operator_action_required:
+                if stopped is not None:
+                    stopped.set()
+                logger.warning(
+                    "worker lane paused for Hermes provider operator action",
+                    extra={
+                        "job_id": str(job_id),
+                        "error_code": str(getattr(exc, "code", ""))[:80],
+                    },
+                )
+            elif cancelled_for_shutdown:
+                logger.info(
+                    "job released for worker shutdown",
+                    extra={"job_id": str(job_id)},
+                )
+            else:
+                logger.error(
+                    "job failed",
+                    extra={
+                        "job_id": str(job_id),
+                        "error_type": type(exc).__name__,
+                        "error_code": str(getattr(exc, "code", "") or "")[:80],
+                    },
+                )
         else:
             with database.begin():
                 succeed(database, job_id=job_id, worker_id=worker_id)
@@ -594,7 +782,11 @@ def _run_worker_loop(
                 last_memory_warning = now
             stopped.wait(settings.worker_poll_seconds)
             continue
-        worked = process_one(worker_id, allowed_kinds=allowed_kinds)
+        worked = process_one(
+            worker_id,
+            allowed_kinds=allowed_kinds,
+            stopped=stopped,
+        )
         if not worked:
             stopped.wait(settings.worker_poll_seconds)
 

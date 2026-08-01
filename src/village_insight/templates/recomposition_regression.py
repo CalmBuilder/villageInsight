@@ -4,6 +4,7 @@ import argparse
 import copy
 import hashlib
 import json
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,7 @@ from typing import Any
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import Cell
 from openpyxl.worksheet.worksheet import Worksheet
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from village_insight.db.models import (
@@ -25,6 +26,7 @@ from village_insight.db.models import (
 from village_insight.db.session import get_session_factory
 from village_insight.parsing.candidates import select_header_candidates
 from village_insight.parsing.router import ParserRouter
+from village_insight.templates.four_layer_seeds import _looks_like_observed_value
 from village_insight.templates.matching import (
     layout_fingerprint,
     match_profile,
@@ -32,12 +34,9 @@ from village_insight.templates.matching import (
 
 CONTRACT_VERSION = "recomposed-template-regression/v1"
 DEFAULT_POPULATION_SOURCE = Path(
-    "docs/datafiles/所有村/官庄村村民委员会/"
-    "2025年官庄村人口明细表8.20日 - 区分各小组.xlsx"
+    "docs/datafiles/所有村/官庄村村民委员会/2025年官庄村人口明细表8.20日 - 区分各小组.xlsx"
 )
-DEFAULT_CROP_SOURCE = Path(
-    "docs/datafiles/所有村/群慧村/2024年农作物登记.xlsx"
-)
+DEFAULT_CROP_SOURCE = Path("docs/datafiles/所有村/群慧村/2024年农作物登记.xlsx")
 
 
 def _sha256(path: Path) -> str:
@@ -63,7 +62,27 @@ def _synthetic_value(value: object, *, case_number: int, row: int, column: int) 
         return case_number * 100_000 + row * 100 + column
     if isinstance(value, float):
         return round(case_number * 1000 + row + column / 100, 2)
+    if isinstance(value, str):
+        compact = "".join(value.split())
+        numeric = compact.replace(",", "")
+        if re.fullmatch(r"[-+]?\d+(?:\.\d+)?", numeric):
+            return str(case_number * 100_000 + row * 100 + column)
+        if re.fullmatch(r"\d{4}[-/.年]\d{1,2}(?:[-/.月]\d{1,2}日?)?", compact):
+            return f"2099-01-{(row % 28) + 1:02d}"
     return f"测试同名人员-{row % 5}" if column == 1 else f"样例{case_number}-{row}-{column}"
+
+
+def _safe_header_value(value: object, *, column: int) -> object:
+    """Keep semantic headers while refusing to duplicate source data as headers."""
+    if value in (None, ""):
+        return value
+    if isinstance(value, str) and value.startswith("="):
+        return str(900_000_000_000_000_000 + column)
+    if _looks_like_observed_value([str(value)]):
+        # Keep the structural signal that this is an observed value, without
+        # copying the source value into a regression artifact.
+        return str(900_000_000_000_000_000 + column)
+    return value
 
 
 def _copy_cell(
@@ -74,7 +93,7 @@ def _copy_cell(
     case_number: int,
 ) -> None:
     target.value = (
-        source.value
+        _safe_header_value(source.value, column=source.column)
         if preserve_value
         else _synthetic_value(
             source.value,
@@ -101,9 +120,11 @@ def _copy_sheet(
     target: Worksheet,
     header_end: int,
     case_number: int,
-    max_body_rows: int = 30,
+    max_body_rows: int | None = None,
 ) -> None:
-    max_row = min(source.max_row, header_end + max_body_rows)
+    max_row = (
+        source.max_row if max_body_rows is None else min(source.max_row, header_end + max_body_rows)
+    )
     for row in source.iter_rows(
         min_row=1,
         max_row=max_row,
@@ -133,7 +154,7 @@ def _copy_sheet(
 
 def _header_end_by_sheet(path: Path) -> dict[int, int]:
     profile = ParserRouter().profile(path)
-    return {
+    detected = {
         sheet.index: max(
             (
                 max(candidate.header_rows)
@@ -143,6 +164,71 @@ def _header_end_by_sheet(path: Path) -> dict[int, int]:
         )
         for sheet in profile.sheets
     }
+    with get_session_factory()() as database:
+        row = (
+            database.execute(
+                text(
+                    """
+                SELECT layout_plan
+                FROM approved_import_plans
+                WHERE source_sha256 = :source_sha256
+                ORDER BY revision DESC
+                LIMIT 1
+                """
+                ),
+                {"source_sha256": profile.source_sha256},
+            )
+            .mappings()
+            .first()
+        )
+    if row is None:
+        return detected
+    approved: dict[int, int] = {}
+    for decision in (row["layout_plan"] or {}).get("decisions", []):
+        if not decision.get("materialize", True):
+            continue
+        match = re.search(r":sheet:(\d+):", str(decision.get("region_candidate_id") or ""))
+        data_start = decision.get("data_start_row")
+        if match is None or not isinstance(data_start, int) or data_start <= 1:
+            continue
+        sheet_index = int(match.group(1))
+        approved[sheet_index] = min(
+            approved.get(sheet_index, data_start - 1),
+            data_start - 1,
+        )
+    return {**detected, **approved}
+
+
+def _approved_mapped_sheet_indexes(path: Path) -> set[int]:
+    source_sha256 = _sha256(path)
+    with get_session_factory()() as database:
+        row = (
+            database.execute(
+                text(
+                    """
+                SELECT layout_plan, field_mappings
+                FROM approved_import_plans
+                WHERE source_sha256 = :source_sha256
+                ORDER BY revision DESC
+                LIMIT 1
+                """
+                ),
+                {"source_sha256": source_sha256},
+            )
+            .mappings()
+            .first()
+        )
+    if row is None:
+        return set()
+    indexes: set[int] = set()
+    mappings = list(row["field_mappings"] or [])
+    for decision in (row["layout_plan"] or {}).get("decisions", []):
+        mappings.extend(decision.get("field_mappings", []))
+    for mapping in mappings:
+        match = re.search(r":sheet:(\d+):", str(mapping.get("region_id") or ""))
+        if match is not None:
+            indexes.add(int(match.group(1)))
+    return indexes
 
 
 def generate_recomposed_workbooks(
@@ -158,7 +244,12 @@ def generate_recomposed_workbooks(
     crop = load_workbook(crop_source, data_only=False)
     rows: list[dict[str, Any]] = []
     try:
-        population_indexes = list(range(1, min(len(population.worksheets), 13)))
+        approved_population_indexes = _approved_mapped_sheet_indexes(population_source)
+        population_indexes = [
+            index
+            for index in range(1, min(len(population.worksheets), 13))
+            if not approved_population_indexes or index in approved_population_indexes
+        ]
         recipes: list[list[tuple[str, int]]] = []
         for case_index in range(16):
             indexes = [
@@ -223,7 +314,12 @@ def generate_recomposed_workbooks(
         challenge_number = len(recipes) + 1
         workbook = Workbook()
         workbook.remove(workbook.active)
-        for ordinal, sheet_index in enumerate((1, 2, 9)):
+        challenge_indexes = (
+            population_indexes[0],
+            population_indexes[len(population_indexes) // 2],
+            population_indexes[-1],
+        )
+        for ordinal, sheet_index in enumerate(challenge_indexes):
             source_sheet = population.worksheets[sheet_index]
             target = workbook.create_sheet(f"挑战-{ordinal + 1}")
             _copy_sheet(
@@ -257,7 +353,7 @@ def generate_recomposed_workbooks(
                         "source_sheet_name": population.worksheets[sheet_index].title,
                         "header_end": population_headers[sheet_index],
                     }
-                    for sheet_index in (1, 2, 9)
+                    for sheet_index in challenge_indexes
                 ],
             }
         )
@@ -352,6 +448,7 @@ def evaluate_recomposed_workbooks(
     exact_regions = sum(row["region_counts"].get("exact", 0) for row in file_rows)
     total_fields = sum(sum(row["field_counts"].values()) for row in file_rows)
     exact_fields = sum(row["field_counts"].get("exact", 0) for row in file_rows)
+    challenge_rows = [row for row in file_rows if row["challenge"]]
     return {
         "contract_version": CONTRACT_VERSION,
         "file_count": total_files,
@@ -386,6 +483,11 @@ def evaluate_recomposed_workbooks(
             "exact_region_rate_at_least_95_percent": (
                 total_regions > 0 and exact_regions / total_regions >= 0.95
             ),
+            "exact_field_rate_at_least_95_percent": (
+                total_fields > 0 and exact_fields / total_fields >= 0.95
+            ),
+            "challenge_files_require_hermes": bool(challenge_rows)
+            and all(row["requires_hermes"] for row in challenge_rows),
         },
         "files": file_rows,
     }
@@ -419,10 +521,7 @@ def main() -> None:
         )
         print(
             json.dumps(
-                {
-                    key: manifest[key]
-                    for key in ("file_count", "source_hash_collision_count")
-                }
+                {key: manifest[key] for key in ("file_count", "source_hash_collision_count")}
             )
         )
         return
@@ -435,9 +534,7 @@ def main() -> None:
         report = evaluate_recomposed_workbooks(
             session,
             manifest=manifest,
-            known_route_fingerprints={
-                str(route["route_fingerprint"]) for route in routes
-            },
+            known_route_fingerprints={str(route["route_fingerprint"]) for route in routes},
         )
     finally:
         session.rollback()

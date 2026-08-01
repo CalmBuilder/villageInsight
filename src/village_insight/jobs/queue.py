@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from village_insight.db.models import IngestionItem, Job, JobStatus
 
+MATERIALIZATION_JOB_MAX_ATTEMPTS = 3
+
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
@@ -173,4 +175,45 @@ def fail(
     else:
         job.status = JobStatus.PENDING
         job.available_at = utcnow() + timedelta(seconds=retry_delay_seconds)
+    return True
+
+
+def release_for_shutdown(
+    session: Session,
+    *,
+    job_id: uuid.UUID,
+    worker_id: str,
+    reason: str,
+) -> bool:
+    """Return an intentionally cancelled job without spending its retry budget."""
+    job = session.get(Job, job_id)
+    if job is None or job.lease_owner != worker_id:
+        return False
+    job.status = JobStatus.PENDING
+    job.attempts = max(0, job.attempts - 1)
+    job.available_at = utcnow()
+    job.lease_owner = None
+    job.lease_expires_at = None
+    job.last_error = reason[:4000]
+    return True
+
+
+def defer_for_operator_action(
+    session: Session,
+    *,
+    job_id: uuid.UUID,
+    worker_id: str,
+    reason: str,
+    retry_delay_seconds: int = 900,
+) -> bool:
+    """Open the circuit without spending a Job attempt on external configuration."""
+    job = session.get(Job, job_id)
+    if job is None or job.lease_owner != worker_id:
+        return False
+    job.status = JobStatus.PENDING
+    job.attempts = max(0, job.attempts - 1)
+    job.available_at = utcnow() + timedelta(seconds=retry_delay_seconds)
+    job.lease_owner = None
+    job.lease_expires_at = None
+    job.last_error = reason[:4000]
     return True

@@ -10,6 +10,7 @@ from village_insight.templates.contracts import (
     RegionTemplateDefinition,
     TemplateDefinition,
 )
+from village_insight.templates.sources import TemplateSource
 
 
 class BatchCreate(BaseModel):
@@ -37,6 +38,7 @@ class BatchRead(BaseModel):
     total_files: int
     completed_files: int
     failed_files: int
+    deleted_files: int
     created_at: datetime
     updated_at: datetime
 
@@ -55,6 +57,9 @@ class ItemRead(BaseModel):
     parser_name: str | None
     error_code: str | None
     error_message: str | None
+    build_result_deletion_status: str
+    build_result_deleted_at: datetime | None
+    build_result_deleted_by_user_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
 
@@ -77,6 +82,7 @@ class FileLedgerItemRead(ItemRead):
     hermes_call_count: int
     record_count: int
     partial_record_count: int
+    governance_pending: bool
     sheet_count: int | None
 
 
@@ -86,6 +92,19 @@ class FileLedgerPage(BaseModel):
     limit: int
     offset: int
     counts: dict[str, int]
+
+
+class BuildResultDeletionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    item_id: uuid.UUID
+    status: str
+    deleted_counts: dict[str, object]
+    retired_counts: dict[str, object]
+    error_code: str | None
+    requested_at: datetime
+    completed_at: datetime | None
 
 
 class TemplateMatchRead(BaseModel):
@@ -394,15 +413,7 @@ class SemanticFieldVariantInput(BaseModel):
         Literal["text", "integer", "decimal", "boolean", "date", "datetime"] | None
     ) = None
     unit_dimension: str | None = Field(default=None, max_length=80)
-    source: Literal[
-        "manual",
-        "codex",
-        "hermes",
-        "hermes_verified",
-        "governance",
-        "bootstrap",
-        "migration",
-    ] = "manual"
+    source: TemplateSource = "manual"
     confidence_basis_points: int = Field(default=10_000, ge=0, le=10_000)
     evidence: dict[str, object] = Field(default_factory=dict)
 
@@ -426,6 +437,8 @@ class SemanticFieldVersionInput(BaseModel):
     aliases: list[str] = Field(default_factory=list)
     validators: list[dict[str, object]] = Field(default_factory=list)
     variants: list[SemanticFieldVariantInput] = Field(default_factory=list)
+    source: TemplateSource = "manual"
+    source_metadata: dict[str, object] = Field(default_factory=dict)
 
 
 class SemanticFieldCreate(SemanticFieldVersionInput):
@@ -446,6 +459,8 @@ class SemanticFieldRead(BaseModel):
     unit_dimension: str | None
     aliases: list[str]
     validators: list[dict[str, object]]
+    source: TemplateSource
+    source_metadata: dict[str, object]
     created_at: datetime
     updated_at: datetime
 
@@ -460,6 +475,8 @@ class SemanticFieldVersionHistoryRead(BaseModel):
     unit_dimension: str | None
     alias_count: int
     variant_count: int
+    source: TemplateSource
+    source_metadata: dict[str, object]
     created_at: datetime
 
 
@@ -482,14 +499,7 @@ class RegionTemplateVersionInput(BaseModel):
     description: str = ""
     region_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     definition: RegionTemplateDefinition
-    source: Literal[
-        "manual",
-        "codex",
-        "hermes",
-        "bootstrap",
-        "migration",
-        "real_regression",
-    ] = "manual"
+    source: TemplateSource = "manual"
     source_metadata: dict[str, object] = Field(default_factory=dict)
 
 
@@ -574,7 +584,7 @@ class SheetCompositionVersionInput(BaseModel):
     composition_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     region_slots: list[SheetCompositionRegionSlotInput] = Field(min_length=1)
     matching_rules: dict[str, object] = Field(default_factory=dict)
-    source: Literal["manual", "codex", "hermes", "bootstrap", "migration"] = "manual"
+    source: TemplateSource = "manual"
     source_metadata: dict[str, object] = Field(default_factory=dict)
 
 
@@ -611,7 +621,7 @@ class WorkbookRouteVersionInput(BaseModel):
     route_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     sheet_slots: list[WorkbookRouteSheetSlotInput] = Field(min_length=1)
     matching_rules: dict[str, object] = Field(default_factory=dict)
-    source: Literal["manual", "codex", "hermes", "bootstrap", "migration"] = "manual"
+    source: TemplateSource = "manual"
     source_metadata: dict[str, object] = Field(default_factory=dict)
 
 
@@ -696,6 +706,7 @@ class LLMConfigurationRead(BaseModel):
     thinking_protocol: Literal["none", "deepseek"]
     api_key_configured: bool
     api_key_hint: str | None
+    api_key_reentry_required: bool = False
     max_tokens: int | None
     source: str
     updated_at: datetime | None
@@ -724,6 +735,7 @@ class LLMProviderPresetRead(BaseModel):
     billing_notice: str | None = None
     api_key_configured: bool = False
     api_key_hint: str | None = None
+    api_key_reentry_required: bool = False
 
 
 class LLMModelDiscoveryRequest(BaseModel):

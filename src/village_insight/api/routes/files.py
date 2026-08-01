@@ -15,7 +15,9 @@ from village_insight.db.models import (
     IngestionBatch,
     IngestionItem,
     MembershipRole,
+    ProposalStatus,
     TemplateMatch,
+    TemplateProposal,
     Tenant,
     User,
 )
@@ -51,7 +53,7 @@ def list_files(
         or principal.has("governance.review")
     ):
         raise HTTPException(status_code=403, detail="没有文件访问权限")
-    filters = []
+    filters = [IngestionItem.build_result_deletion_status != "deleted"]
     if principal.membership.role == MembershipRole.PLATFORM_ADMIN:
         pass
     elif principal.membership.role == MembershipRole.TENANT_ADMIN:
@@ -117,17 +119,35 @@ def list_files(
         .group_by(DatasetRecord.item_id)
         .subquery()
     )
+    governance_counts = (
+        select(
+            TemplateProposal.source_item_id.label("item_id"),
+            func.count(TemplateProposal.id).label("governance_count"),
+        )
+        .where(
+            TemplateProposal.status == ProposalStatus.PENDING,
+            TemplateProposal.build_result_retired_at.is_(None),
+        )
+        .group_by(TemplateProposal.source_item_id)
+        .subquery()
+    )
 
     status_predicates = {
-        "imported": IngestionItem.formal_import_status == "imported",
-        "processing": IngestionItem.status.in_(PROCESSING_STATUSES),
+        "imported": IngestionItem.formal_import_status.in_({"imported", "partial"}),
+        "partial": IngestionItem.formal_import_status == "partial",
+        "processing": or_(
+            IngestionItem.status.in_(PROCESSING_STATUSES),
+            IngestionItem.build_result_deletion_status.in_(
+                {"deletion_pending", "deleting"}
+            ),
+        ),
         "hermes": or_(
             IngestionItem.status == "recognizing",
             func.coalesce(hermes_counts.c.hermes_count, 0) > 0,
         ),
         "review": or_(
             IngestionItem.status == "needs_review",
-            IngestionItem.formal_import_status == "partial",
+            func.coalesce(governance_counts.c.governance_count, 0) > 0,
         ),
         "failed": IngestionItem.status == "failed",
     }
@@ -148,6 +168,7 @@ def list_files(
         )
         .join(User, User.id == IngestionBatch.created_by_user_id)
         .outerjoin(hermes_counts, hermes_counts.c.item_id == IngestionItem.id)
+        .outerjoin(governance_counts, governance_counts.c.item_id == IngestionItem.id)
     )
     total = database.scalar(
         base_joins.with_only_columns(func.count(IngestionItem.id))
@@ -176,6 +197,7 @@ def list_files(
             func.coalesce(hermes_counts.c.hermes_count, 0),
             func.coalesce(record_counts.c.record_count, 0),
             func.coalesce(record_counts.c.partial_record_count, 0),
+            func.coalesce(governance_counts.c.governance_count, 0),
             func.coalesce(sheet_counts.c.sheet_count, 0),
         )
         .join(IngestionBatch, IngestionBatch.id == IngestionItem.batch_id)
@@ -187,6 +209,7 @@ def list_files(
         .join(User, User.id == IngestionBatch.created_by_user_id)
         .outerjoin(TemplateMatch, TemplateMatch.item_id == IngestionItem.id)
         .outerjoin(hermes_counts, hermes_counts.c.item_id == IngestionItem.id)
+        .outerjoin(governance_counts, governance_counts.c.item_id == IngestionItem.id)
         .outerjoin(record_counts, record_counts.c.item_id == IngestionItem.id)
         .outerjoin(sheet_counts, sheet_counts.c.item_id == IngestionItem.id)
         .where(*page_filters)
@@ -206,6 +229,7 @@ def list_files(
         hermes_count,
         record_count,
         partial_record_count,
+        governance_count,
         sheet_count,
     ) in rows:
         result.append(
@@ -229,6 +253,11 @@ def list_files(
                 parser_name=item.parser_name,
                 error_code=item.error_code,
                 error_message=item.error_message,
+                build_result_deletion_status=item.build_result_deletion_status,
+                build_result_deleted_at=item.build_result_deleted_at,
+                build_result_deleted_by_user_id=(
+                    item.build_result_deleted_by_user_id
+                ),
                 created_at=item.created_at,
                 updated_at=item.updated_at,
                 match_type=match.match_type if match else None,
@@ -242,6 +271,7 @@ def list_files(
                 hermes_call_count=hermes_count,
                 record_count=record_count,
                 partial_record_count=partial_record_count,
+                governance_pending=governance_count > 0,
                 sheet_count=sheet_count,
             )
         )
@@ -252,7 +282,15 @@ def list_files(
         offset=offset,
         counts=dict(
             zip(
-                ["all", "imported", "processing", "hermes", "review", "failed"],
+                [
+                    "all",
+                    "imported",
+                    "partial",
+                    "processing",
+                    "hermes",
+                    "review",
+                    "failed",
+                ],
                 count_row,
                 strict=True,
             )

@@ -1,0 +1,118 @@
+{
+  "contract_version": "synthetic-village-dataset/v1",
+  "dataset_version": "synthetic-village-v1",
+  "generated_at": "2026-08-01T00:00:00+00:00",
+  "privacy": {
+    "source_cell_values_copied": false,
+    "contains_real_person_identifiers": false,
+    "identifier_namespace": "TEST-ID / TEST-PHONE / DEMO-HH",
+    "administrative_area": "演示县/演示镇/演示一村",
+    "formulas_allowed": false,
+    "external_links_allowed": false
+  },
+  "templates": [
+    {
+      "key": "population",
+      "route": "workbook.structured.d16e0f18c03f9fdc9795@2",
+      "sheet": "sheet.structured.68231c630e9990629fef@1",
+      "region": "region.population.beea70777607695d924f@1",
+      "record_count": 180,
+      "headers": [
+        "乡镇",
+        "村（居）委会",
+        "户号",
+        "本户地址",
+        "姓名",
+        "与户主关系",
+        "性别",
+        "公民身份号码",
+        "户类型"
+      ],
+      "field_codes": [
+        "bootstrap.shared.98fa3b8f0ba6fcbe9cc5",
+        "address.village",
+        "household.number",
+        "household.address",
+        "person.name",
+        "household.relationship_to_head",
+        "person.sex",
+        "person.id_card_number",
+        "household.type"
+      ]
+    },
+    {
+      "key": "party",
+      "route": "workbook.structured.c47e78ae07d0f8eb8293@2",
+      "sheet": "sheet.structured.e18df584b6d7cb597994@1",
+      "region": "region.population.8fef505486bbe5584252@1",
+      "record_count": 120,
+      "headers": [
+        "序号",
+        "姓名",
+        "性别",
+        "民族",
+        "籍贯",
+        "学历",
+        "出生日期",
+        "年龄",
+        "公民身份证号",
+        "入党时间",
+        "转正时间",
+        "所属支部",
+        "电话"
+      ],
+      "field_codes": [
+        "base.sequence_number",
+        "person.name",
+        "person.sex",
+        "bootstrap.shared.d83224e934c42bb6b6c2",
+        "bootstrap.shared.ad7f1d8db6350309d49b",
+        "bootstrap.shared.f38bc8a75cd651403898",
+        "bootstrap.base.293c6a49c45a2d50ca19",
+        "person.age",
+        "bootstrap.shared.fc1271ecb27b13148a23",
+        "bootstrap.shared.3dee56168d0c8e9b2a3f",
+        "bootstrap.shared.47edd238d92c0b339f04",
+        "bootstrap.shared.e82ea484ab600d27e47e",
+        "person.phone_number"
+      ]
+    }
+  ],
+  "record_count": 300,
+  "question_count": 231,
+  "question_category_counts": {
+    "count": 2,
+    "distinct_count": 1,
+    "entity_lookup": 180,
+    "filtered_count": 28,
+    "sensitive_permission_blocked": 20
+  },
+  "files": [
+    {
+      "path": "data/演示一村户籍人口.xlsx",
+      "size_bytes": 13543,
+      "sha256": "02cf17d9486e2ff13873a14e719a9dfc09f038bef711af036a67d20bc94beb1a"
+    },
+    {
+      "path": "data/演示一村党员名册.xlsx",
+      "size_bytes": 14248,
+      "sha256": "c7c9ed493e3cb8cd815f1696b5acebc89687130b1e82e49ec896afcf0581af01"
+    },
+    {
+      "path": "questions.json",
+      "size_bytes": 122519,
+      "sha256": "19912bc4c60dbead6534e04910c36b2b101ca3b16c7309e71565d19c2e1ebfb0"
+    },
+    {
+      "path": "questions.xlsx",
+      "size_bytes": 15425,
+      "sha256": "d24829af04f1d8208cb240526856f41ad84aa44d9324b3b4137a077dd43886e6"
+    },
+    {
+      "path": "expected-results.json",
+      "size_bytes": 51314,
+      "sha256": "3f8e06a7d1b8008a75f01a7c9fd36ba2f9ad37b61707f7eac7bc6d2f77deba8d"
+    }
+  ],
+  "manifest_sha256": "648ccffcc6b5e1dd7d81de882026bbffecc7fc7fade34b782f5eadc7178bcc06"
+}

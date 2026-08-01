@@ -14,11 +14,6 @@ build/
 
 data/
 docs/
-!docs/
-docs/*
-!docs/assets/
-docs/assets/*
-!docs/assets/villageinsight-hero.png
 uploads/
 artifacts/
 other_projects/
@@ -36,6 +31,9 @@ logs/
 *.tmp
 *.swp
 *.bak
-tests/
 backups/
 test-results/
+
+# Public synthetic fixtures are repository assets, not runtime data.
+!sample-data/
+!sample-data/**

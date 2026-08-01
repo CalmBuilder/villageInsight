@@ -115,6 +115,15 @@ function kindLabel(kind: SemanticField["variants"][number]["kind"]) {
   }[kind];
 }
 
+function templateSourceLabel(source: string) {
+  return ({
+    validated_baseline: "已验收基线",
+    validated_corpus: "真实语料验证稳定态",
+    auto_governance: "自动治理",
+    manual_governance: "管理员治理",
+  } as Record<string, string>)[source] ?? `历史来源（${source}）`;
+}
+
 function routeSourceFileCount(route: WorkbookRoute) {
   const paths = new Set<string>();
   for (const member of route.source_metadata.members ?? []) {
@@ -1005,6 +1014,7 @@ function FieldInspector({
             <div><dt>数据类型</dt><dd>{resolvedField.data_type}</dd></div>
             <div><dt>单位</dt><dd>{resolvedField.unit_dimension || "无"}</dd></div>
             <div><dt>已发布版本</dt><dd>{resolvedField.published_version ? `v${resolvedField.published_version}` : "无"}</dd></div>
+            <div><dt>模板来源</dt><dd>{templateSourceLabel(resolvedField.source)}</dd></div>
           </dl>
           <section className="catalog-evidence-band">
             <span>语义复用边界</span>
@@ -1069,7 +1079,7 @@ function FieldInspector({
                 <span>v{version.version}</span>
                 <div>
                   <strong>{version.name}</strong>
-                  <small>{version.data_type} · {version.variant_count} 个变体</small>
+                  <small>{version.data_type} · {version.variant_count} 个变体 · {templateSourceLabel(version.source)}</small>
                 </div>
                 <StatusBadge status={version.status} />
               </li>
@@ -1221,6 +1231,7 @@ function RegionInspector({
           <div><dt>内部结构类型</dt><dd>{preview?.layout_mode || template.definition.region_kind}</dd></div>
           <div><dt>模板编码</dt><dd>{template.code}</dd></div>
           <div><dt>模板版本</dt><dd>v{template.version}</dd></div>
+          <div><dt>模板来源</dt><dd>{templateSourceLabel(template.source)}</dd></div>
         </dl>
       </details>
     </div>
@@ -1253,7 +1264,7 @@ function CompositionInspector({
       </section>
       <details className="catalog-technical-details">
         <summary>查看技术信息</summary>
-        <p>{composition.code} · v{composition.version}</p>
+        <p>{composition.code} · v{composition.version} · {templateSourceLabel(composition.source)}</p>
       </details>
     </div>
   );
@@ -1326,7 +1337,7 @@ function RouteInspector({
       </section>
       <details className="catalog-technical-details">
         <summary>查看技术信息</summary>
-        <p>{route.code} · v{route.version}</p>
+        <p>{route.code} · v{route.version} · {templateSourceLabel(route.source)}</p>
       </details>
     </div>
   );

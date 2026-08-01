@@ -29,6 +29,7 @@ from village_insight.hermes.runtime import (
     HermesInvalidResponseError,
     HermesUnavailableError,
 )
+from village_insight.hermes.secrets import SecretDecryptionError
 
 router = APIRouter(
     prefix="/settings",
@@ -49,7 +50,7 @@ def update_llm_configuration(
 ) -> LLMConfigurationRead:
     try:
         return save_configuration(database, get_settings(), payload)
-    except ValueError as exc:
+    except (ValueError, SecretDecryptionError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
@@ -66,7 +67,7 @@ def get_llm_models(
     try:
         connection = draft_connection(database, get_settings(), payload)
         return discover_models(connection)
-    except ValueError as exc:
+    except (ValueError, SecretDecryptionError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
@@ -83,7 +84,7 @@ async def test_llm_configuration(
             else resolve_configuration(database, settings).connection
         )
         validate_endpoint_url(connection.base_url, resolve=True)
-    except ValueError as exc:
+    except (ValueError, SecretDecryptionError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     started = perf_counter()
     try:

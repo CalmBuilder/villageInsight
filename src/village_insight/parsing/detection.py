@@ -12,6 +12,7 @@ _ZIP_MAGIC = b"PK\x03\x04"
 _MEDIA_TYPES: dict[DocumentFormat, str] = {
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "xls": "application/vnd.ms-excel",
+    "excel_html": "application/vnd.ms-excel",
     "csv": "text/csv",
 }
 
@@ -59,6 +60,23 @@ def _csv_signature(payload: bytes) -> tuple[bool, str]:
     return len(widths) >= 2 and max(widths, default=0) >= 2, encoding
 
 
+def _excel_html_signature(payload: bytes) -> tuple[bool, str]:
+    decoded = _decode_text(payload)
+    if decoded is None:
+        return False, ""
+    text, encoding = decoded
+    normalized = text.lstrip("\ufeff\t\r\n ").lower()
+    is_excel_html = (
+        normalized.startswith(("<!doctype html", "<html"))
+        and "<table" in normalized
+        and (
+            "urn:schemas-microsoft-com:office:excel" in normalized
+            or "xmlns:x=" in normalized
+        )
+    )
+    return is_excel_html, encoding
+
+
 def detect_document(path: Path) -> DetectionResult:
     try:
         payload = path.read_bytes()
@@ -81,17 +99,29 @@ def detect_document(path: Path) -> DetectionResult:
         document_format = "xls"
         signature = "ole-compound"
     else:
-        is_csv, encoding = _csv_signature(payload)
-        if not is_csv:
+        is_excel_html, encoding = _excel_html_signature(payload)
+        if is_excel_html:
+            document_format = "excel_html"
+            signature = f"excel-html:{encoding}"
+        else:
+            is_csv, encoding = _csv_signature(payload)
+        if not is_excel_html and not is_csv:
             raise DocumentDetectionError(
                 "UNSUPPORTED_DOCUMENT_FORMAT",
-                "content is not a supported XLSX, XLS, or delimited text document",
+                "content is not a supported XLSX, XLS, Excel HTML, or delimited text document",
             )
-        document_format = "csv"
-        signature = f"delimited-text:{encoding}"
+        if not is_excel_html:
+            document_format = "csv"
+            signature = f"delimited-text:{encoding}"
 
     extension = path.suffix.lower().lstrip(".")
-    extension_matches = extension == document_format
+    expected_extensions = {
+        "xlsx": {"xlsx"},
+        "xls": {"xls"},
+        "excel_html": {"xls", "html", "htm"},
+        "csv": {"csv"},
+    }
+    extension_matches = extension in expected_extensions[document_format]
     warnings = []
     if not extension_matches:
         warnings.append(

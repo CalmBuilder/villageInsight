@@ -15,7 +15,7 @@ from village_insight.db.schema import (
 )
 from village_insight.hermes.endpoints import validate_endpoint_url
 from village_insight.hermes.runtime import HermesConnection
-from village_insight.hermes.secrets import SecretCipher
+from village_insight.hermes.secrets import SecretCipher, SecretDecryptionError
 
 CONFIGURATION_ID = "default"
 
@@ -164,9 +164,7 @@ def resolve_configuration(
             updated_at=None,
         )
     if stored.thinking_protocol not in {"none", "deepseek"}:
-        raise ValueError(
-            f"Unsupported thinking protocol: {stored.thinking_protocol}"
-        )
+        raise ValueError(f"Unsupported thinking protocol: {stored.thinking_protocol}")
     if stored.api_mode not in {"openai_chat", "anthropic_messages"}:
         raise ValueError(f"Unsupported API mode: {stored.api_mode}")
     api_key = SecretCipher(settings.resolved_secret_key_path()).decrypt(stored.encrypted_api_key)
@@ -220,8 +218,13 @@ def provider_presets_read(
     result: list[LLMProviderPresetRead] = []
     for preset in PROVIDER_PRESETS:
         stored = database.get(LLMProviderCredential, preset.id)
+        reentry_required = False
         if stored is not None:
-            key = cipher.decrypt(stored.encrypted_api_key)
+            try:
+                key = cipher.decrypt(stored.encrypted_api_key)
+            except SecretDecryptionError:
+                key = ""
+                reentry_required = True
         elif preset.id == environment_preset_id:
             key = environment.api_key
         else:
@@ -231,6 +234,7 @@ def provider_presets_read(
                 update={
                     "api_key_configured": bool(key),
                     "api_key_hint": api_key_hint(key),
+                    "api_key_reentry_required": reentry_required,
                 }
             )
         )
@@ -241,9 +245,35 @@ def configuration_read(
     database: Session,
     settings: Settings,
 ) -> LLMConfigurationRead:
-    resolved = resolve_configuration(database, settings)
-    connection = resolved.connection
     stored = database.get(LLMConfiguration, CONFIGURATION_ID)
+    try:
+        resolved = resolve_configuration(database, settings)
+    except SecretDecryptionError:
+        if stored is None:
+            raise
+        return LLMConfigurationRead(
+            provider=stored.provider,
+            preset_id=stored.preset_id,
+            api_mode=cast(
+                Literal["openai_chat", "anthropic_messages"],
+                stored.api_mode,
+            ),
+            model=stored.model,
+            fast_model=stored.fast_model,
+            reasoning_model=stored.reasoning_model,
+            base_url=stored.base_url,
+            thinking_protocol=cast(
+                Literal["none", "deepseek"],
+                stored.thinking_protocol,
+            ),
+            api_key_configured=False,
+            api_key_hint=None,
+            api_key_reentry_required=True,
+            max_tokens=stored.max_tokens,
+            source="database",
+            updated_at=stored.updated_at,
+        )
+    connection = resolved.connection
     return LLMConfigurationRead(
         provider=connection.provider,
         preset_id=(
@@ -259,6 +289,7 @@ def configuration_read(
         thinking_protocol=connection.thinking_protocol,
         api_key_configured=bool(connection.api_key),
         api_key_hint=api_key_hint(connection.api_key),
+        api_key_reentry_required=False,
         max_tokens=connection.max_tokens,
         source=resolved.source,
         updated_at=resolved.updated_at,
@@ -271,29 +302,37 @@ def draft_connection(
     payload: LLMConfigurationUpdate,
 ) -> HermesConnection:
     base_url = validate_endpoint_url(payload.base_url, resolve=False)
-    current = resolve_configuration(database, settings).connection
-    stored_credential = database.get(LLMProviderCredential, payload.preset_id)
-    stored_key = ""
-    if (
-        stored_credential is not None
-        and stored_credential.provider == payload.provider
-        and stored_credential.api_mode == payload.api_mode
-        and stored_credential.base_url.rstrip("/") == base_url
-    ):
-        stored_key = SecretCipher(settings.resolved_secret_key_path()).decrypt(
-            stored_credential.encrypted_api_key
-        )
-    can_reuse_current_key = (
-        current.provider == payload.provider
-        and current.base_url.rstrip("/") == base_url
-        and current.api_mode == payload.api_mode
-    )
-    api_key = (
-        payload.api_key
-        or stored_key
-        or (current.api_key if can_reuse_current_key else "")
-    )
+    api_key = payload.api_key or ""
+    decryption_failed = False
     if not api_key:
+        cipher = SecretCipher(settings.resolved_secret_key_path())
+        stored_credential = database.get(LLMProviderCredential, payload.preset_id)
+        if (
+            stored_credential is not None
+            and stored_credential.provider == payload.provider
+            and stored_credential.api_mode == payload.api_mode
+            and stored_credential.base_url.rstrip("/") == base_url
+        ):
+            try:
+                api_key = cipher.decrypt(stored_credential.encrypted_api_key)
+            except SecretDecryptionError:
+                decryption_failed = True
+        if not api_key:
+            try:
+                current = resolve_configuration(database, settings).connection
+            except SecretDecryptionError:
+                decryption_failed = True
+            else:
+                can_reuse_current_key = (
+                    current.provider == payload.provider
+                    and current.base_url.rstrip("/") == base_url
+                    and current.api_mode == payload.api_mode
+                )
+                if can_reuse_current_key:
+                    api_key = current.api_key
+    if not api_key:
+        if decryption_failed:
+            raise ValueError("已保存的 API Key 无法解密，请重新输入 API Key")
         raise ValueError("请为这个连接输入 API Key 后再测试")
     if payload.api_mode == "anthropic_messages" and payload.thinking_protocol != "none":
         raise ValueError("Anthropic Messages 连接不能使用 DeepSeek 思考参数")
