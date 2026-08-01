@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Template-driven structured document ingestion and trusted village-data Q&A"
 readme = "README.md"
 requires-python = ">=3.13"
-license = { text = "Proprietary" }
+license = "Apache-2.0"
 dependencies = [
   "alembic>=1.14,<2",
   "cryptography>=46,<47",

@@ -404,3 +404,7 @@ uv run village-insight-hermes-check
 
 - [阶段 2 中间验收](docs/research/stage-05-materialization/ACCEPTANCE-2026-07-29.md)
 - [阶段 3 中间验收](docs/research/stage-03-batch-review/ACCEPTANCE-2026-07-29.md)
+
+## 许可证
+
+本项目依据 [Apache License 2.0](LICENSE) 许可使用、修改和分发。
