@@ -24,6 +24,7 @@ docs/assets/*
 uploads/
 artifacts/
 other_projects/
+plans/
 
 frontend/node_modules/
 frontend/dist/

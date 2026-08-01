@@ -398,7 +398,6 @@ uv run village-insight-hermes-check
 - [多租户、行政区划与数据权限实施方案](docs/多租户行政区划与数据权限实施方案.md)
 - [开发约定](docs/development.md)
 - [Hermes 内嵌运行说明](docs/hermes-embedded.md)
-- [README 快速开始与 settings.key 改造方案](plans/readme-quickstart-and-settings-key.md)
 
 真实业务文件闭环只有在上传、识别、审核、物化、查询和证据验收全部通过后才能声明业务
 基线通过。旧语料分析、工具运行或小样本成功不能替代端到端验收：
