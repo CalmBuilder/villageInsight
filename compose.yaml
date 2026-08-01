@@ -5,6 +5,29 @@ x-application-database-environment: &application-database-environment
   DATABASE_URL: ${POSTGRES_APPLICATION_URL:-postgresql+psycopg://village_insight:village_insight@postgres:5432/village_insight}
 
 services:
+  secret-init:
+    profiles: ["application"]
+    build:
+      context: .
+    user: "0:0"
+    env_file: .env
+    environment:
+      <<: *application-database-environment
+      SECRET_KEY_PATH: /data/secrets/settings.key
+      VI_HOST_UID: ${VI_HOST_UID:-1000}
+      VI_HOST_GID: ${VI_HOST_GID:-1000}
+    command: >
+      sh -c 'village-insight-secret-preflight
+      --owner-uid "$${VI_HOST_UID}" --group-gid "$${VI_HOST_GID}"'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - village-insight
+    volumes:
+      - ./data/secrets:/data/secrets
+    restart: "no"
+
   api:
     profiles: ["application"]
     build:
@@ -22,15 +45,19 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      secret-init:
+        condition: service_completed_successfully
+    group_add:
+      - "${VI_HOST_GID:-1000}"
     networks:
       - village-insight
     volumes:
       - upload_data:/data/uploads
       - ./data/server-transfer/current:/data/server-transfer:ro
-      - ./data/secrets:/data/secrets:ro
+      - ./data/secrets:/data/secrets
       - ./data/import:/data/import:ro
     ports:
-      - "8000:8000"
+      - "${API_BIND_ADDRESS:-127.0.0.1}:${EXPOSE_API_PORT:-8000}:8000"
     restart: unless-stopped
 
   worker-parse:
@@ -49,6 +76,8 @@ services:
     depends_on:
       api:
         condition: service_started
+    group_add:
+      - "${VI_HOST_GID:-1000}"
     networks:
       - village-insight
     volumes:
@@ -74,6 +103,8 @@ services:
     depends_on:
       api:
         condition: service_started
+    group_add:
+      - "${VI_HOST_GID:-1000}"
     networks:
       - village-insight
     volumes:
@@ -99,6 +130,8 @@ services:
     depends_on:
       api:
         condition: service_started
+    group_add:
+      - "${VI_HOST_GID:-1000}"
     networks:
       - village-insight
     volumes:
@@ -117,7 +150,7 @@ services:
     networks:
       - village-insight
     ports:
-      - "5173:80"
+      - "${WEB_BIND_ADDRESS:-0.0.0.0}:${EXPOSE_WEB_PORT:-5173}:80"
     restart: unless-stopped
 
 volumes:

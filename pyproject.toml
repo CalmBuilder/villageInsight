@@ -48,6 +48,7 @@ village-insight-template-regression = "village_insight.templates.regression:main
 village-insight-recomposition-regression = "village_insight.templates.recomposition_regression:main"
 village-insight-demo-identities = "village_insight.identity_demo:main"
 village-insight-bootstrap = "village_insight.bootstrap:main"
+village-insight-secret-preflight = "village_insight.secret_preflight:main"
 village-insight-question-benchmark = "village_insight.question_benchmark:main"
 village-insight-question-classify = "village_insight.question_benchmark_classification:main"
 village-insight-question-tool-map = "village_insight.question_tool_mapping:main"

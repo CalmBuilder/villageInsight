@@ -6,6 +6,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 def _write_executable(path: Path, body: str) -> None:
     path.write_text(body, encoding="utf-8")
@@ -41,8 +43,11 @@ exit 0
         """#!/usr/bin/env bash
 printf '%s\n' "$*" >> npm.calls
 if [[ " $* " == *" run preview "* ]]; then
+  bash -c 'trap "exit 0" TERM INT; while true; do sleep 0.1; done' &
+  child_pid=$!
+  printf '%s\n' "$child_pid" > frontend-child.pid
   trap 'exit 0' TERM INT
-  while true; do sleep 0.1; done
+  wait "$child_pid"
 fi
 exit 0
 """,
@@ -74,6 +79,7 @@ exit 0
     assert "run dev" not in npm_calls
     uv_calls = (project / "uv.calls").read_text(encoding="utf-8")
     assert "run alembic upgrade head" in uv_calls
+    assert "run village-insight-secret-preflight" in uv_calls
     assert "run village-insight-bootstrap" in uv_calls
     assert (project / "data" / "run" / "app.pid").is_file()
     for component in (
@@ -112,3 +118,8 @@ exit 0
     assert stopped.returncode == 0, stopped.stderr
     assert "PostgreSQL 保持运行" in stopped.stdout
     assert not (project / "data" / "run" / "app.pid").exists()
+    frontend_child_pid = int(
+        (project / "frontend-child.pid").read_text(encoding="utf-8").strip()
+    )
+    with pytest.raises(ProcessLookupError):
+        os.kill(frontend_child_pid, 0)

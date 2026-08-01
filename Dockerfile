@@ -12,8 +12,9 @@ COPY alembic ./alembic
 COPY src ./src
 RUN uv sync --frozen --no-dev
 
-RUN useradd --create-home --uid 10001 village-insight \
-    && mkdir -p /data/uploads /data/import \
+RUN groupadd --gid 10001 village-insight \
+    && useradd --create-home --uid 10001 --gid 10001 village-insight \
+    && mkdir -p /data/uploads /data/import /data/secrets \
     && chown -R village-insight:village-insight /data /app
 USER village-insight
 

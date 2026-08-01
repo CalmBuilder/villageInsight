@@ -12,6 +12,7 @@ from village_insight.hermes.configuration import (
     configuration_read,
     draft_connection,
     environment_connection,
+    provider_presets_read,
     resolve_configuration,
     save_configuration,
 )
@@ -82,6 +83,47 @@ def test_configuration_moves_environment_secret_to_encrypted_storage(
         )
 
     assert (tmp_path / "settings.key").stat().st_mode & 0o777 == 0o600
+
+
+def test_missing_key_degrades_and_explicit_reentry_recovers(tmp_path: Path) -> None:
+    key_path = tmp_path / "settings.key"
+    settings = Settings(_env_file=None, secret_key_path=key_path)
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    payload = LLMConfigurationUpdate(
+        provider="deepseek",
+        preset_id="deepseek",
+        api_mode="openai_chat",
+        model="deepseek-v4-flash",
+        fast_model="deepseek-v4-flash",
+        reasoning_model="deepseek-v4-pro",
+        base_url="https://api.deepseek.com",
+        thinking_protocol="none",
+        api_key="old-api-key",
+    )
+
+    with Session(engine) as database:
+        save_configuration(database, settings, payload)
+        key_path.unlink()
+
+        degraded = configuration_read(database, settings)
+        presets = provider_presets_read(database, settings)
+        assert degraded.api_key_reentry_required is True
+        assert degraded.provider == "deepseek"
+        assert degraded.base_url == "https://api.deepseek.com"
+        deepseek_preset = next(preset for preset in presets if preset.id == "deepseek")
+        assert deepseek_preset.api_key_reentry_required
+        assert not key_path.exists()
+
+        recovered = save_configuration(
+            database,
+            settings,
+            payload.model_copy(update={"api_key": "replacement-key"}),
+        )
+        assert recovered.api_key_reentry_required is False
+        assert resolve_configuration(database, settings).connection.api_key == "replacement-key"
+
+    assert key_path.is_file()
 
 
 def test_environment_key_is_bound_to_selected_provider() -> None:

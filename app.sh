@@ -67,6 +67,21 @@ pid_is_running() {
   kill -0 "$pid" 2>/dev/null
 }
 
+component_group_is_running() {
+  local leader_pid="$1"
+  kill -0 -- "-${leader_pid}" 2>/dev/null
+}
+
+signal_component_group() {
+  local signal="$1"
+  local leader_pid="$2"
+  if component_group_is_running "$leader_pid"; then
+    kill "-${signal}" -- "-${leader_pid}" 2>/dev/null || true
+  elif pid_is_running "$leader_pid"; then
+    kill "-${signal}" "$leader_pid" 2>/dev/null || true
+  fi
+}
+
 pid_matches_supervisor() {
   local pid="$1"
   local arguments=""
@@ -140,7 +155,7 @@ ensure_port_available() {
 
 check_commands() {
   local command_name
-  for command_name in curl docker uv node npm; do
+  for command_name in curl docker uv node npm setsid; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
       echo "缺少启动依赖：${command_name}" >&2
       exit 1
@@ -198,6 +213,8 @@ prepare_application() {
 
   echo "执行数据库迁移..."
   uv run alembic upgrade head
+  echo "检查模型凭据加密密钥..."
+  uv run village-insight-secret-preflight
   echo "初始化平台管理员和演示操作员..."
   uv run village-insight-bootstrap
 }
@@ -206,9 +223,9 @@ start_component() {
   local component="$1"
   shift
   if (( log_to_files )); then
-    "$@" >> "$LOG_DIR/${component}.log" 2>&1 &
+    setsid "$@" >> "$LOG_DIR/${component}.log" 2>&1 &
   else
-    "$@" &
+    setsid "$@" &
   fi
   local pid=$!
   child_pids+=("$pid")
@@ -224,12 +241,14 @@ cleanup() {
 
   local pid remaining=()
   if (( ${#child_pids[@]} )); then
-    kill "${child_pids[@]}" 2>/dev/null || true
+    for pid in "${child_pids[@]}"; do
+      signal_component_group TERM "$pid"
+    done
     local deadline=$((SECONDS + STOP_TIMEOUT_SECONDS))
     while (( SECONDS < deadline )); do
       remaining=()
       for pid in "${child_pids[@]}"; do
-        if pid_is_running "$pid"; then
+        if component_group_is_running "$pid"; then
           remaining+=("$pid")
         fi
       done
@@ -237,8 +256,10 @@ cleanup() {
       sleep 1
     done
     if (( ${#remaining[@]} )); then
-      echo "部分应用进程未在 ${STOP_TIMEOUT_SECONDS} 秒内退出，执行强制清理：${remaining[*]}" >&2
-      kill -9 "${remaining[@]}" 2>/dev/null || true
+      echo "部分应用进程组未在 ${STOP_TIMEOUT_SECONDS} 秒内退出，执行强制清理：${remaining[*]}" >&2
+      for pid in "${remaining[@]}"; do
+        signal_component_group KILL "$pid"
+      done
     fi
     wait "${child_pids[@]}" 2>/dev/null || true
   fi
@@ -327,7 +348,7 @@ start_background() {
   done
   rotate_component_logs
 
-  nohup "$PROJECT_ROOT/app.sh" _supervise >> "$LOG_DIR/supervisor.log" 2>&1 &
+  nohup setsid "$PROJECT_ROOT/app.sh" _supervise >> "$LOG_DIR/supervisor.log" 2>&1 &
   pid=$!
   printf '%s\n' "$pid" > "$SUPERVISOR_PID_FILE"
   echo "正在后台启动 VillageInsight（supervisor PID: ${pid}）..."
