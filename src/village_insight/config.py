@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     parse_workers: int = 2
     hermes_workers: int = 1
     materialize_workers: int = 1
-    hermes_enabled: bool = False
+    hermes_enabled: bool = True
     hermes_model: str | None = None
     hermes_fast_model: str | None = None
     hermes_reasoning_model: str | None = None
@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     session_cookie_name: str = "vi_session"
     session_lifetime_hours: int = 12
     session_cookie_secure: bool = False
+    bootstrap_platform_tenant_name: str = "管理员租户"
+    bootstrap_admin_username: str = "admin"
+    bootstrap_operator_username: str = "demo"
     bootstrap_tenant_name: str | None = None
     bootstrap_township_name: str | None = None
     bootstrap_village_name: str | None = None

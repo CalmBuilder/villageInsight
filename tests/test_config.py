@@ -3,6 +3,12 @@ from pathlib import Path
 from village_insight.config import Settings
 
 
+def test_hermes_is_enabled_by_default() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.hermes_enabled is True
+
+
 def test_csv_settings_are_split(tmp_path: Path) -> None:
     settings = Settings(
         _env_file=None,

@@ -19,8 +19,6 @@ from village_insight.api.routes import (
 )
 from village_insight.api.routes import settings as settings_routes
 from village_insight.config import get_settings
-from village_insight.db.session import get_session_factory
-from village_insight.identity import ensure_bootstrap_identity
 from village_insight.logging import configure_logging
 
 
@@ -29,8 +27,6 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings.log_level)
     settings.resolved_upload_root().mkdir(parents=True, exist_ok=True)
-    with get_session_factory()() as database:
-        ensure_bootstrap_identity(database, settings)
     yield
 
 

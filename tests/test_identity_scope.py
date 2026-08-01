@@ -3,11 +3,12 @@ from __future__ import annotations
 from collections.abc import Generator
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from village_insight.api.app import app
+from village_insight.config import Settings
 from village_insight.db.base import Base
 from village_insight.db.models import (
     AdministrativeUnit,
@@ -25,7 +26,7 @@ from village_insight.db.models import (
     User,
 )
 from village_insight.db.session import get_db
-from village_insight.identity import PASSWORD_HASH
+from village_insight.identity import PASSWORD_HASH, ensure_bootstrap_identity
 from village_insight.identity_demo import DEMO_VILLAGES, ensure_demo_identities
 
 
@@ -115,6 +116,67 @@ def _seed_identity(database: Session) -> dict[str, object]:
         result[username] = user
     database.commit()
     return result
+
+
+def test_bootstrap_identity_creates_default_login_accounts() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    settings = Settings(
+        _env_file=None,
+        bootstrap_tenant_name="演示租户",
+        bootstrap_township_name="示例乡镇",
+        bootstrap_village_name="示例村",
+        bootstrap_password="VillageInsight-ChangeMe-2026",
+    )
+
+    with Session(engine, expire_on_commit=False) as database:
+        first = ensure_bootstrap_identity(database, settings)
+        assert first.created_users == 2
+        accounts = {
+            user.username: user
+            for user in database.scalars(
+                select(User).where(User.username.in_(("admin", "demo")))
+            )
+        }
+        assert set(accounts) == {"admin", "demo"}
+        assert all(
+            PASSWORD_HASH.verify(
+                "VillageInsight-ChangeMe-2026", user.password_hash
+            )
+            for user in accounts.values()
+        )
+        memberships = {
+            membership.user_id: membership
+            for membership in database.scalars(select(TenantMembership))
+        }
+        assert memberships[accounts["admin"].id].role == MembershipRole.PLATFORM_ADMIN
+        assert memberships[accounts["demo"].id].role == MembershipRole.VILLAGE_OPERATOR
+
+        accounts["admin"].password_hash = PASSWORD_HASH.hash("changed secure password")
+        database.commit()
+        second = ensure_bootstrap_identity(database, settings)
+        assert second.created_users == 0
+        database.refresh(accounts["admin"])
+        assert PASSWORD_HASH.verify(
+            "changed secure password", accounts["admin"].password_hash
+        )
+
+        demo_membership = memberships[accounts["demo"].id]
+        database.execute(
+            delete(MembershipScope).where(
+                MembershipScope.membership_id == demo_membership.id
+            )
+        )
+        database.delete(demo_membership)
+        database.delete(accounts["demo"])
+        database.commit()
+        repaired = ensure_bootstrap_identity(database, settings)
+        assert repaired.created_users == 1
+        assert database.scalar(select(User).where(User.username == "demo")) is not None
 
 
 def test_roles_and_village_scope_are_enforced() -> None:

@@ -8,7 +8,7 @@ from datetime import timedelta
 
 from pwdlib import PasswordHash
 from pwdlib.hashers.argon2 import Argon2Hasher
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from village_insight.config import Settings
@@ -70,6 +70,12 @@ class Principal:
 
     def has(self, permission: str) -> bool:
         return permission in self.permissions
+
+
+@dataclass(frozen=True)
+class BootstrapIdentityResult:
+    usernames: tuple[str, str]
+    created_users: int
 
 
 def hash_session_token(token: str) -> str:
@@ -202,74 +208,224 @@ def resolve_principal(database: Session, raw_token: str) -> Principal | None:
     )
 
 
-def ensure_bootstrap_identity(database: Session, settings: Settings) -> None:
+def _bootstrap_lock(database: Session) -> None:
+    if database.bind is not None and database.bind.dialect.name == "postgresql":
+        database.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_key)"),
+            {"lock_key": 0x56494C4C414745},
+        )
+
+
+def _bootstrap_tenant(
+    database: Session,
+    *,
+    name: str,
+    kind: str,
+) -> Tenant:
+    tenant = database.scalar(select(Tenant).where(Tenant.name == name))
+    if tenant is None:
+        tenant = Tenant(name=name, kind=kind, status=UserStatus.ACTIVE)
+        database.add(tenant)
+        database.flush()
+        return tenant
+    if tenant.kind != kind or tenant.status != UserStatus.ACTIVE:
+        raise RuntimeError(f"初始化租户 {name} 已存在，但类型或状态不符合预期")
+    return tenant
+
+
+def _bootstrap_unit(
+    database: Session,
+    *,
+    tenant: Tenant,
+    name: str,
+    unit_type: str,
+    parent: AdministrativeUnit | None,
+) -> AdministrativeUnit:
+    unit = database.scalar(
+        select(AdministrativeUnit).where(
+            AdministrativeUnit.tenant_id == tenant.id,
+            AdministrativeUnit.parent_id == (parent.id if parent else None),
+            AdministrativeUnit.unit_type == unit_type,
+            AdministrativeUnit.name == name,
+        )
+    )
+    if unit is None:
+        unit = AdministrativeUnit(
+            tenant_id=tenant.id,
+            parent_id=parent.id if parent else None,
+            unit_type=unit_type,
+            name=name,
+            status=UserStatus.ACTIVE,
+        )
+        database.add(unit)
+        database.flush()
+        return unit
+    if unit.status != UserStatus.ACTIVE:
+        raise RuntimeError(f"初始化行政单元 {name} 已存在，但当前已停用")
+    return unit
+
+
+def _bootstrap_user(
+    database: Session,
+    *,
+    username: str,
+    display_name: str,
+    password: str,
+) -> tuple[User, bool]:
+    user = database.scalar(select(User).where(User.username == username))
+    if user is None:
+        user = User(
+            username=username,
+            display_name=display_name,
+            password_hash=PASSWORD_HASH.hash(password),
+            status=UserStatus.ACTIVE,
+        )
+        database.add(user)
+        database.flush()
+        return user, True
+    if user.status != UserStatus.ACTIVE:
+        raise RuntimeError(f"初始化账号 {username} 已存在，但当前已停用")
+    return user, False
+
+
+def _bootstrap_membership(
+    database: Session,
+    *,
+    user: User,
+    tenant: Tenant,
+    role: str,
+    unit: AdministrativeUnit | None,
+) -> None:
+    memberships = list(
+        database.scalars(
+            select(TenantMembership).where(TenantMembership.user_id == user.id)
+        )
+    )
+    if memberships:
+        if len(memberships) != 1:
+            raise RuntimeError(f"初始化账号 {user.username} 已绑定多个租户，拒绝自动修改")
+        membership = memberships[0]
+        if (
+            membership.tenant_id != tenant.id
+            or membership.role != role
+            or membership.status != UserStatus.ACTIVE
+        ):
+            raise RuntimeError(
+                f"初始化账号 {user.username} 已绑定其他租户、角色或状态，拒绝自动修改"
+            )
+    else:
+        membership = TenantMembership(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            role=role,
+            status=UserStatus.ACTIVE,
+        )
+        database.add(membership)
+        database.flush()
+
+    scopes = list(
+        database.scalars(
+            select(MembershipScope).where(
+                MembershipScope.membership_id == membership.id
+            )
+        )
+    )
+    if unit is None:
+        if scopes:
+            raise RuntimeError(f"平台管理员 {user.username} 不应绑定行政范围")
+        return
+    if not scopes:
+        database.add(
+            MembershipScope(
+                membership_id=membership.id,
+                administrative_unit_id=unit.id,
+                include_descendants=False,
+            )
+        )
+        return
+    if (
+        len(scopes) != 1
+        or scopes[0].administrative_unit_id != unit.id
+        or scopes[0].include_descendants
+    ):
+        raise RuntimeError(f"初始化账号 {user.username} 的行政范围与预期不一致")
+
+
+def ensure_bootstrap_identity(
+    database: Session,
+    settings: Settings,
+) -> BootstrapIdentityResult:
     values = (
+        settings.bootstrap_platform_tenant_name,
+        settings.bootstrap_admin_username,
+        settings.bootstrap_operator_username,
         settings.bootstrap_tenant_name,
         settings.bootstrap_township_name,
         settings.bootstrap_village_name,
         settings.bootstrap_password,
     )
-    if not any(values):
-        return
     if not all(values):
         raise RuntimeError(
-            "bootstrap tenant, township, village, and password must be configured together"
+            "初始化平台租户、账号、业务租户、乡镇、村和密码必须完整配置"
         )
     if len(settings.bootstrap_password or "") < 12:
-        raise RuntimeError("bootstrap password must contain at least 12 characters")
-    if database.scalar(select(Tenant).where(Tenant.name == settings.bootstrap_tenant_name)):
-        return
+        raise RuntimeError("初始化密码必须至少包含 12 个字符")
+    if settings.bootstrap_admin_username == settings.bootstrap_operator_username:
+        raise RuntimeError("平台管理员和演示操作员必须使用不同用户名")
 
-    tenant = Tenant(name=settings.bootstrap_tenant_name)
-    database.add(tenant)
-    database.flush()
-    township = AdministrativeUnit(
-        tenant_id=tenant.id,
+    _bootstrap_lock(database)
+    platform_tenant = _bootstrap_tenant(
+        database,
+        name=settings.bootstrap_platform_tenant_name,
+        kind=TenantKind.PLATFORM,
+    )
+    business_tenant = _bootstrap_tenant(
+        database,
+        name=settings.bootstrap_tenant_name or "",
+        kind=TenantKind.BUSINESS,
+    )
+    township = _bootstrap_unit(
+        database,
+        tenant=business_tenant,
+        name=settings.bootstrap_township_name or "",
         unit_type=AdministrativeUnitType.TOWNSHIP,
-        name=settings.bootstrap_township_name,
+        parent=None,
     )
-    database.add(township)
-    database.flush()
-    village = AdministrativeUnit(
-        tenant_id=tenant.id,
-        parent_id=township.id,
+    village = _bootstrap_unit(
+        database,
+        tenant=business_tenant,
+        name=settings.bootstrap_village_name or "",
         unit_type=AdministrativeUnitType.VILLAGE,
-        name=settings.bootstrap_village_name,
+        parent=township,
     )
-    database.add(village)
-    database.flush()
-
-    accounts = (
-        ("tenant-admin", "租户管理员", MembershipRole.TENANT_ADMIN, township, True),
-        (
-            "village-operator",
-            "村级数据员",
-            MembershipRole.VILLAGE_OPERATOR,
-            village,
-            False,
-        ),
+    admin, admin_created = _bootstrap_user(
+        database,
+        username=settings.bootstrap_admin_username,
+        display_name="平台管理员",
+        password=settings.bootstrap_password or "",
     )
-    for username, display_name, role, unit, include_descendants in accounts:
-        user = User(
-            username=username,
-            display_name=display_name,
-            password_hash=PASSWORD_HASH.hash(settings.bootstrap_password or ""),
-        )
-        database.add(user)
-        database.flush()
-        membership = TenantMembership(
-            tenant_id=tenant.id,
-            user_id=user.id,
-            role=role,
-        )
-        database.add(membership)
-        database.flush()
-        if unit is not None:
-            database.add(
-                MembershipScope(
-                    membership_id=membership.id,
-                    administrative_unit_id=unit.id,
-                    include_descendants=include_descendants,
-                )
-            )
+    operator, operator_created = _bootstrap_user(
+        database,
+        username=settings.bootstrap_operator_username,
+        display_name="演示数据操作员",
+        password=settings.bootstrap_password or "",
+    )
+    _bootstrap_membership(
+        database,
+        user=admin,
+        tenant=platform_tenant,
+        role=MembershipRole.PLATFORM_ADMIN,
+        unit=None,
+    )
+    _bootstrap_membership(
+        database,
+        user=operator,
+        tenant=business_tenant,
+        role=MembershipRole.VILLAGE_OPERATOR,
+        unit=village,
+    )
     database.commit()
+    return BootstrapIdentityResult(
+        usernames=(admin.username, operator.username),
+        created_users=int(admin_created) + int(operator_created),
+    )

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/villageinsight-hero.png" alt="村知数：让每一份村情表格变成可追溯的可信数据" width="100%" />
+  <img src="docs/assets/villageinsight-hero-v2.png" alt="村知数：四层模板自治理、版本审计与应急恢复、确定性入库与可信问数" width="100%" />
 </p>
 
 # VillageInsight（村知数）
@@ -38,20 +38,37 @@ VillageInsight 是面向村情结构化资料的模板化解析、批量入库�
 
 ## 快速开始
 
-首次启动前必须先准备两份互不提交 Git 的环境配置：
+在项目根目录依次执行以下 3 条命令即可完成本地首次启动：
 
 ```bash
-cp .env.example .env
-cp docker/.env.example docker/.env
-chmod 600 .env docker/.env
+cp .env.example .env                    # 应用配置；默认创建登录账号并启用 Hermes，调用模型前需配置模型和 API Key
+cp docker/.env.example docker/.env      # PostgreSQL 容器配置；本地体验可直接使用，修改数据库密码时须同步修改根目录 .env
+./app.sh                                # 构建前端，并在后台启动 PostgreSQL、API、Worker 和前端服务
 ```
 
-两份文件职责不同：
+启动完成后访问 <http://localhost:9137>。迁移完成后，初始化命令会在 PostgreSQL 中
+创建以下两个应用账号，默认密码均为 `VillageInsight-ChangeMe-2026`：
+
+- `admin`：平台管理员，登录后进入管理端；
+- `demo`：演示数据操作员，可上传、治理和查询“示例村”的演示数据。
+
+两份 `.env` 都已被 Git 忽略，职责分别是：
 
 - 根目录 `.env`：API、Worker、前端构建预览服务、Hermes、上传目录和初始化账号配置；
 - `docker/.env`：PostgreSQL 镜像、数据库身份、宿主机映射端口和资源参数。
 
-启动前至少检查以下对应关系：
+仅启动服务并登录页面的最小修改量是 **零修改**：示例中的数据库名、账号、密码和端口
+已经对齐，默认应用账号也会自动写入数据库。Hermes 默认启用，但真正执行模板识别或
+问数前，至少要在登录后的“设置”页面配置供应商、Base URL、模型和 API Key，也可以
+直接填写根目录 `.env` 中对应的 `HERMES_*` 变量。
+
+如果只想换掉示例数据库密码，至少需要同时修改：
+
+- `docker/.env` 的 `POSTGRES_PASSWORD`；
+- 根目录 `.env` 的 `DATABASE_URL` 中的密码；
+- 使用全容器模式时，还要同步修改 `docker/.env` 的 `POSTGRES_APPLICATION_URL`。
+
+生产部署不能直接使用示例配置，至少还要完成以下核对和修改：
 
 - `docker/.env` 中的 `POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD`，必须与
   根目录 `.env` 的 `DATABASE_URL` 一致；
@@ -62,6 +79,12 @@ chmod 600 .env docker/.env
   `POSTGRES_IMAGE`；
 - 生产环境必须修改数据库密码、`BOOTSTRAP_PASSWORD`、可信来源和安全 Cookie 配置，
   不得直接使用示例凭据。
+
+生产服务器应额外限制配置文件权限：
+
+```bash
+chmod 600 .env docker/.env
+```
 
 ### 两种运行模式
 
@@ -147,17 +170,19 @@ rg -n "ERROR|Traceback|Exception|失败" logs/
 
 为兼容已有本地开发流程，`.env` 缺失时脚本仍会从 `.env.example` 创建，但
 `docker/.env` 不会自动生成；新机器不应依赖自动创建，应在启动前按上述步骤配置并核对
-两份文件。Hermes 默认关闭；需要启用时，请先在 `.env` 中配置相应模型和密钥。
+两份文件。Hermes 默认启用；尚未配置模型和密钥时不影响服务启动和页面登录，但执行
+识别或问数会提示补充模型配置。
 
-开发环境首次启动会按 `.env` 中的 `BOOTSTRAP_*` 配置创建一个业务租户、一个村和
-两个固定职责账号：
+`app.sh` 会在 Alembic 迁移后执行 `village-insight-bootstrap`，按 `.env` 中的
+`BOOTSTRAP_*` 配置创建一个平台租户、一个演示业务租户、一个村和两个固定账号：
 
-- `tenant-admin`：可在租户范围问答，并选择下属村上传；
-- `village-operator`：可以上传并查询所属村；
+- `admin`：平台管理员，只进入管理端；
+- `demo`：村级数据员，只操作示例村的演示数据。
 
-`.env.example` 中的密码仅用于本地首次启动，启动前必须修改。已有 `.env` 的开发环境
-需要手工补充 `BOOTSTRAP_TENANT_NAME`、`BOOTSTRAP_TOWNSHIP_NAME`、
-`BOOTSTRAP_VILLAGE_NAME` 和 `BOOTSTRAP_PASSWORD`。生产环境不得使用示例凭据。
+`.env.example` 中的密码仅用于本地体验，首次登录后可以立即修改。已有 `.env` 的开发
+环境需要手工补充全部 `BOOTSTRAP_*` 配置。初始化命令可以重复执行，不会覆盖账号已经
+修改的密码；如果同名账号已绑定其他租户或角色，命令会失败而不会自动改绑。生产环境
+必须在首次启动前替换示例密码，不得使用公开凭据。
 
 需要创建管理员租户、X租户、六个村级测试账号、租户管理员 `x` 和平台管理员 `admin`
 时，执行：
@@ -179,9 +204,10 @@ cp docker/.env.example docker/.env
 # 编辑并核对两份配置后再继续
 docker compose --env-file docker/.env up -d postgres
 uv run alembic upgrade head
+uv run village-insight-bootstrap
 ```
 
-这一步只启动 PostgreSQL。
+这一步启动 PostgreSQL、迁移结构并初始化 `admin` 和 `demo`，尚未启动应用进程。
 
 ### 全容器模式：服务器部署基础
 
@@ -298,6 +324,7 @@ postgres` 重建容器；该命令不会删除命名卷或 bind mount 数据，�
 ```bash
 uv sync --all-extras
 uv run alembic upgrade head
+uv run village-insight-bootstrap
 uv run uvicorn village_insight.api.app:app --reload
 ```
 
@@ -356,8 +383,9 @@ dry-run 会逐表显示待补回、待修复和待清理的模板行，再显示
 
 新环境从零初始化不需要数据文件：`docker compose --env-file docker/.env up -d postgres`
 后执行
-`uv run alembic upgrade head` 即可建出全部表结构，首次启动再按 `BOOTSTRAP_*`
-自动创建初始租户和账号。
+`uv run alembic upgrade head` 建出全部表结构，再执行
+`uv run village-insight-bootstrap`，按 `BOOTSTRAP_*` 创建 `admin`、`demo` 及其最小组织
+范围。初始化命令不导入业务数据。
 
 需要把现有数据整体迁移到服务器时，使用 PostgreSQL 全量备份：
 

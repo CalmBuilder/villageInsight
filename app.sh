@@ -198,6 +198,8 @@ prepare_application() {
 
   echo "执行数据库迁移..."
   uv run alembic upgrade head
+  echo "初始化平台管理员和演示操作员..."
+  uv run village-insight-bootstrap
 }
 
 start_component() {

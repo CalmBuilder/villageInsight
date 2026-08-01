@@ -28,6 +28,7 @@ def test_app_script_background_lifecycle_and_logs(tmp_path: Path) -> None:
     _write_executable(
         bin_dir / "uv",
         """#!/usr/bin/env bash
+printf '%s\n' "$*" >> uv.calls
 if [[ " $* " == *" uvicorn "* || " $* " == *" village-insight-worker "* ]]; then
   trap 'exit 0' TERM INT
   while true; do sleep 0.1; done
@@ -71,6 +72,9 @@ exit 0
     assert "--prefix frontend run build" in npm_calls
     assert "--prefix frontend run preview" in npm_calls
     assert "run dev" not in npm_calls
+    uv_calls = (project / "uv.calls").read_text(encoding="utf-8")
+    assert "run alembic upgrade head" in uv_calls
+    assert "run village-insight-bootstrap" in uv_calls
     assert (project / "data" / "run" / "app.pid").is_file()
     for component in (
         "api",

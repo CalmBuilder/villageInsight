@@ -1,0 +1,221 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="840" viewBox="0 0 1600 840">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FBFCFA"/>
+      <stop offset="0.58" stop-color="#F4F8F5"/>
+      <stop offset="1" stop-color="#E7F2ED"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#23836B"/>
+      <stop offset="1" stop-color="#105441"/>
+    </linearGradient>
+    <linearGradient id="ledger" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#F8FBF9"/>
+      <stop offset="1" stop-color="#EEF6F2"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#DCE9E3" stroke-width="1"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#15372D" flood-opacity="0.13"/>
+    </filter>
+    <filter id="soft" x="-20%" y="-30%" width="140%" height="180%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#15372D" flood-opacity="0.08"/>
+    </filter>
+    <style>
+      text { font-family: "WenQuanYi Zen Hei", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; }
+      .headline { fill:#15231E; font-size:43px; font-weight:700; letter-spacing:-0.5px; }
+      .eyebrow { fill:#176B55; font-size:18px; font-weight:700; letter-spacing:0.7px; }
+      .supporting { fill:#66766F; font-size:18px; }
+      .cardTitle { fill:#20302A; font-size:21px; font-weight:700; }
+      .cardCopy { fill:#6E7D77; font-size:15px; }
+      .uiTitle { fill:#20302A; font-size:18px; font-weight:700; }
+      .uiLabel { fill:#52655E; font-size:13px; font-weight:700; }
+      .uiCopy { fill:#71817A; font-size:11px; }
+      .layerTitle { fill:#173E32; font-size:13px; font-weight:700; }
+      .layerCopy { fill:#6E7D77; font-size:10px; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="840" fill="url(#bg)"/>
+  <circle cx="1520" cy="40" r="220" fill="#DCEDE5" opacity="0.52"/>
+  <circle cx="1350" cy="850" r="310" fill="#E2F0EA" opacity="0.72"/>
+  <path d="M0 690C255 612 440 770 708 698C920 640 1050 562 1242 616C1417 665 1490 778 1600 730V840H0Z" fill="#EAF4EF" opacity="0.68"/>
+
+  <!-- 品牌 -->
+  <g transform="translate(70 58) scale(.72)">
+    <path d="M14 30L32 14L50 30" fill="none" stroke="#CFB46C" stroke-linecap="round" stroke-linejoin="round" stroke-width="5"/>
+    <g fill="none" stroke="#176B55" stroke-width="3">
+      <rect x="18" y="36" width="28" height="16" rx="2"/>
+      <path d="M18 44H46M32 36V52"/>
+    </g>
+  </g>
+  <text x="132" y="84" fill="#17211D" font-size="27" font-weight="700">村知数</text>
+  <text x="132" y="104" fill="#7A8983" font-size="11" letter-spacing="4">VILLAGEINSIGHT</text>
+
+  <!-- 自包含的治理工作台 -->
+  <g filter="url(#shadow)">
+    <rect x="54" y="146" width="780" height="616" rx="25" fill="#FFFFFF"/>
+    <rect x="54" y="146" width="780" height="58" rx="25" fill="#F3F6F4"/>
+    <rect x="54" y="180" width="780" height="24" fill="#F3F6F4"/>
+    <circle cx="86" cy="175" r="6" fill="#D6DED9"/>
+    <circle cx="107" cy="175" r="6" fill="#D6DED9"/>
+    <circle cx="128" cy="175" r="6" fill="#D6DED9"/>
+    <rect x="164" y="164" width="366" height="23" rx="12" fill="#E6ECE8"/>
+    <text x="185" y="181" fill="#82918B" font-size="12">VillageInsight · 模板自治理工作台</text>
+    <rect x="74" y="204" width="740" height="536" fill="url(#ledger)" stroke="#E4EAE6"/>
+    <rect x="74" y="204" width="740" height="536" fill="url(#grid)" opacity="0.24"/>
+  </g>
+
+  <g transform="translate(94 226)">
+    <text x="0" y="20" class="uiTitle">四层模板治理链</text>
+    <text x="0" y="43" class="uiCopy">结构识别交给 Hermes，证据、版本、发布与写入由确定性程序裁决</text>
+    <rect x="516" y="0" width="91" height="28" rx="14" fill="#E3F1EB"/>
+    <circle cx="534" cy="14" r="5" fill="#1D8065"/>
+    <text x="546" y="19" fill="#176B55" font-size="11" font-weight="700">版本已发布</text>
+    <rect x="615" y="0" width="84" height="28" rx="14" fill="#F7F1DF"/>
+    <text x="630" y="19" fill="#8B7027" font-size="11" font-weight="700">全链路审计</text>
+
+    <!-- 原始证据 -->
+    <g transform="translate(0 76)" filter="url(#soft)">
+      <rect width="124" height="142" rx="18" fill="#FFFFFF" stroke="#DCE9E3"/>
+      <rect x="18" y="19" width="88" height="72" rx="10" fill="#EDF6F2"/>
+      <path d="M31 35H93M31 49H93M31 63H93M31 77H93M47 27V84M68 27V84" stroke="#92BBAA" stroke-width="1.5"/>
+      <path d="M82 27V84" stroke="#CFB46C" stroke-width="2"/>
+      <text x="18" y="115" class="uiLabel">原始表格证据</text>
+      <text x="18" y="134" class="uiCopy">文件 · Sheet · 行列</text>
+    </g>
+
+    <path d="M136 147H164" stroke="#9ABDB0" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M157 140L165 147L157 154" fill="none" stroke="#9ABDB0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- 四层模板 -->
+    <g transform="translate(174 76)">
+      <g filter="url(#soft)">
+        <rect width="122" height="142" rx="18" fill="#FFFFFF" stroke="#D9E8E1"/>
+        <circle cx="27" cy="29" r="12" fill="#E4F1EB"/>
+        <text x="23" y="34" fill="#176B55" font-size="14" font-weight="700">1</text>
+        <text x="18" y="61" class="layerTitle">字段</text>
+        <text x="18" y="81" class="layerCopy">语义、别名、类型</text>
+        <path d="M18 100H104M18 113H86M18 126H96" stroke="#B4CDC3" stroke-width="3" stroke-linecap="round"/>
+      </g>
+      <g transform="translate(132)" filter="url(#soft)">
+        <rect width="122" height="142" rx="18" fill="#FFFFFF" stroke="#D9E8E1"/>
+        <circle cx="27" cy="29" r="12" fill="#E4F1EB"/>
+        <text x="23" y="34" fill="#176B55" font-size="14" font-weight="700">2</text>
+        <text x="18" y="61" class="layerTitle">Region</text>
+        <text x="18" y="81" class="layerCopy">表头、区域、粒度</text>
+        <rect x="18" y="99" width="86" height="28" rx="6" fill="#EFF6F3" stroke="#B4CDC3"/>
+        <path d="M47 99V127M75 99V127" stroke="#B4CDC3"/>
+      </g>
+      <g transform="translate(264)" filter="url(#soft)">
+        <rect width="122" height="142" rx="18" fill="#FFFFFF" stroke="#D9E8E1"/>
+        <circle cx="27" cy="29" r="12" fill="#E4F1EB"/>
+        <text x="23" y="34" fill="#176B55" font-size="14" font-weight="700">3</text>
+        <text x="18" y="61" class="layerTitle">Sheet</text>
+        <text x="18" y="81" class="layerCopy">区域组合与槽位</text>
+        <rect x="18" y="99" width="38" height="28" rx="5" fill="#EFF6F3" stroke="#B4CDC3"/>
+        <rect x="64" y="99" width="40" height="28" rx="5" fill="#EFF6F3" stroke="#B4CDC3"/>
+      </g>
+      <g transform="translate(396)" filter="url(#soft)">
+        <rect width="130" height="142" rx="18" fill="#FFFFFF" stroke="#D9E8E1"/>
+        <circle cx="27" cy="29" r="12" fill="#E4F1EB"/>
+        <text x="23" y="34" fill="#176B55" font-size="14" font-weight="700">4</text>
+        <text x="18" y="61" class="layerTitle">Workbook Route</text>
+        <text x="18" y="81" class="layerCopy">多 Sheet 工作簿路由</text>
+        <path d="M19 116H45L58 103H82L94 116H111" fill="none" stroke="#8CB5A5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      </g>
+    </g>
+
+    <!-- 治理动作 -->
+    <g transform="translate(0 246)">
+      <rect width="699" height="74" rx="18" fill="#F7FAF8" stroke="#DCE9E3"/>
+      <g transform="translate(18 15)">
+        <circle cx="22" cy="22" r="22" fill="#E3F1EB"/>
+        <path d="M12 22l7 7 14-16" fill="none" stroke="#176B55" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="54" y="19" class="uiLabel">精确匹配</text><text x="54" y="38" class="uiCopy">命中即可复用</text>
+      </g>
+      <g transform="translate(182 15)">
+        <circle cx="22" cy="22" r="22" fill="#E3F1EB"/>
+        <path d="M12 26c5 8 18 9 24 1M36 18c-5-8-18-9-24-1" fill="none" stroke="#176B55" stroke-width="2.7" stroke-linecap="round"/>
+        <text x="54" y="19" class="uiLabel">增量治理</text><text x="54" y="38" class="uiCopy">差异形成待审版本</text>
+      </g>
+      <g transform="translate(354 15)">
+        <circle cx="22" cy="22" r="22" fill="#F6EED8"/>
+        <path d="M15 12h14l6 6v15H15zM29 12v7h6" fill="none" stroke="#9A7A28" stroke-width="2.4" stroke-linejoin="round"/>
+        <text x="54" y="19" class="uiLabel">版本审计</text><text x="54" y="38" class="uiCopy">发布历史不可变</text>
+      </g>
+      <g transform="translate(524 15)">
+        <circle cx="22" cy="22" r="22" fill="#F6EED8"/>
+        <path d="M11 22a12 12 0 1 0 4-9M11 12v10h10" fill="none" stroke="#9A7A28" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="54" y="19" class="uiLabel">基线恢复</text><text x="54" y="38" class="uiCopy">完整目录可校验</text>
+      </g>
+    </g>
+
+    <!-- 权威记录和问数 -->
+    <path d="M350 327V349" stroke="#8FB5A6" stroke-width="2.5"/>
+    <path d="M343 342L350 350L357 342" fill="none" stroke="#8FB5A6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(0 350)">
+      <rect width="699" height="126" rx="20" fill="#FFFFFF" stroke="#D6E6DE" filter="url(#soft)"/>
+      <g transform="translate(20 19)">
+        <ellipse cx="34" cy="14" rx="30" ry="11" fill="#DCEDE5" stroke="#176B55" stroke-width="2"/>
+        <path d="M4 14v47c0 6 13 11 30 11s30-5 30-11V14M4 37c0 6 13 11 30 11s30-5 30-11" fill="#EDF6F2" stroke="#176B55" stroke-width="2"/>
+        <text x="82" y="26" class="uiTitle">PostgreSQL 单一事实源</text>
+        <text x="82" y="50" class="uiCopy">JSONB 权威记录 · 原始单元格血缘 · 可重建类型化投影</text>
+        <rect x="82" y="64" width="105" height="28" rx="14" fill="#E5F2EC"/>
+        <text x="101" y="83" fill="#176B55" font-size="11" font-weight="700">确定性写入</text>
+        <rect x="197" y="64" width="105" height="28" rx="14" fill="#E5F2EC"/>
+        <text x="216" y="83" fill="#176B55" font-size="11" font-weight="700">后端强制范围</text>
+        <rect x="312" y="64" width="105" height="28" rx="14" fill="#E5F2EC"/>
+        <text x="331" y="83" fill="#176B55" font-size="11" font-weight="700">数值可复核</text>
+        <path d="M472 22h113a18 18 0 0 1 18 18v28a18 18 0 0 1-18 18h-78l-19 15 5-15h-21a18 18 0 0 1-18-18V40a18 18 0 0 1 18-18z" fill="url(#green)"/>
+        <text x="487" y="49" fill="#FFFFFF" font-size="12" font-weight="700">有边界可信问数</text>
+        <text x="487" y="70" fill="#DDF2E9" font-size="10">答案带来源与范围</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- 右侧价值主张 -->
+  <g transform="translate(884 120)">
+    <rect width="350" height="38" rx="19" fill="#E3F0EA"/>
+    <circle cx="22" cy="19" r="7" fill="#176B55"/>
+    <text x="40" y="26" class="eyebrow">VillageInsight · 自治理村情数据平台</text>
+
+    <text x="0" y="94" class="headline">让村情表格沉淀为</text>
+    <text x="0" y="147" class="headline">可治理、可追溯、可问数的</text>
+    <text x="0" y="200" class="headline" fill="#176B55">可信数据</text>
+    <text x="2" y="237" class="supporting">从原始证据到四层模板、确定性入库与有边界问数</text>
+
+    <g transform="translate(0 270)" filter="url(#soft)">
+      <rect width="636" height="106" rx="22" fill="#FFFFFF" fill-opacity=".96"/>
+      <rect x="20" y="17" width="72" height="72" rx="20" fill="#E5F2EC"/>
+      <rect x="37" y="34" width="38" height="8" rx="4" fill="#176B55"/>
+      <rect x="42" y="48" width="33" height="8" rx="4" fill="#4F9A82"/>
+      <rect x="47" y="62" width="28" height="8" rx="4" fill="#82B9A6"/>
+      <path d="M35 77H78" stroke="#CFB46C" stroke-width="3" stroke-linecap="round"/>
+      <text x="116" y="45" class="cardTitle">四层模板自治理</text>
+      <text x="116" y="73" class="cardCopy">字段 · Region · Sheet · Workbook Route</text>
+    </g>
+
+    <g transform="translate(0 392)" filter="url(#soft)">
+      <rect width="636" height="106" rx="22" fill="#FFFFFF" fill-opacity=".96"/>
+      <rect x="20" y="17" width="72" height="72" rx="20" fill="#E5F2EC"/>
+      <path d="M39 43h23l11 11v25H39zM62 43v12h11" fill="none" stroke="#176B55" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M45 63h21M45 71h16" stroke="#176B55" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M31 53a25 25 0 0 1 7-15M31 53l-1-10M31 53l9-3" fill="none" stroke="#CFB46C" stroke-width="2.5" stroke-linecap="round"/>
+      <text x="116" y="45" class="cardTitle">版本审计与应急恢复</text>
+      <text x="116" y="73" class="cardCopy">精确匹配、增量治理、完整基线可恢复</text>
+    </g>
+
+    <g transform="translate(0 514)" filter="url(#soft)">
+      <rect width="636" height="106" rx="22" fill="#FFFFFF" fill-opacity=".96"/>
+      <rect x="20" y="17" width="72" height="72" rx="20" fill="#E5F2EC"/>
+      <circle cx="49" cy="49" r="15" fill="none" stroke="#176B55" stroke-width="3"/>
+      <path d="M60 60l17 17M42 49h14M49 42v14" stroke="#176B55" stroke-width="3" stroke-linecap="round"/>
+      <text x="116" y="45" class="cardTitle">确定性入库与可信问数</text>
+      <text x="116" y="73" class="cardCopy">PostgreSQL 单一事实源 · 行列血缘 · 后端强制范围</text>
+    </g>
+  </g>
+
+  <text x="72" y="810" fill="#617970" font-size="13">原始证据不可变 · 模板版本可审计 · 数值答案可复核</text>
+</svg>

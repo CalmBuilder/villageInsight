@@ -14,6 +14,13 @@ build/
 
 data/
 docs/
+# README 头图属于开源仓库资产，其余 docs 内容继续忽略。
+!docs/
+docs/*
+!docs/assets/
+docs/assets/*
+!docs/assets/villageinsight-hero-v2.png
+!docs/assets/villageinsight-hero-v2.svg
 uploads/
 artifacts/
 other_projects/
